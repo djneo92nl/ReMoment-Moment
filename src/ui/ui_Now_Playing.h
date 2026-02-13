@@ -23,14 +23,16 @@ extern lv_obj_t *ui_Player;
 extern lv_obj_t *ui_Container1;
 extern lv_obj_t *ui_progress;
 extern lv_obj_t *ui_song_length;
-extern lv_obj_t *ui_playng_process;
+extern lv_obj_t *ui_playing_progress;
 extern lv_obj_t *ui_Volume_Indicator;
 // CUSTOM VARIABLES
 extern lv_obj_t *uic_Now_Playing;
 extern lv_obj_t *uic_album_art;
+extern lv_obj_t *uic_track_name;
 extern lv_obj_t *uic_Artist;
+extern lv_obj_t *uic_progress;
 extern lv_obj_t *uic_song_length;
-extern lv_obj_t *uic_playng_process;
+extern lv_obj_t *uic_playing_progress;
 
 #ifdef __cplusplus
 } /*extern "C"*/
