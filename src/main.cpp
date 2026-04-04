@@ -31,6 +31,12 @@ volatile bool trackNameUpdated = false;
 char track_artist[64];
 char track_name[64];
 
+// Playback state
+int new_progress = 0;           // 0-100
+bool is_playing = false;
+unsigned long last_data_ms = 0; // millis() of last received MQTT data
+#define NOT_PLAYING_TIMEOUT_MS 15000
+
 // Update labels
 void update_player_data(void *param) {
     lv_label_set_text(ui_track_name, track_name);
@@ -38,9 +44,19 @@ void update_player_data(void *param) {
 }
 
 // Update progress slider
-int new_progress = 0; // 0-100
 void update_player_progress(void *param) {
     lv_slider_set_value(uic_playing_progress, new_progress, LV_ANIM_ON);
+}
+
+void show_not_playing(void *param) {
+    lv_label_set_text(ui_track_name, "\u2014");  // em dash
+    lv_label_set_text(ui_Artist, "");
+    lv_slider_set_value(uic_playing_progress, 0, LV_ANIM_OFF);
+    lv_obj_set_style_img_opa(ui_album_art, LV_OPA_50, 0);
+}
+
+void show_playing(void *param) {
+    lv_obj_set_style_img_opa(ui_album_art, LV_OPA_COVER, 0);
 }
 
 void wifi_connect() {
@@ -83,6 +99,11 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
             track_name[sizeof(track_name)-1] = '\0';
 
             lv_async_call(update_player_data, NULL);
+            last_data_ms = millis();
+            if (!is_playing) {
+                is_playing = true;
+                lv_async_call(show_playing, NULL);
+            }
         }
     }
     else if (strstr(topic, "/progress")) {
@@ -93,6 +114,11 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
 
         new_progress = val;
         lv_async_call(update_player_progress, NULL);
+        last_data_ms = millis();
+        if (!is_playing) {
+            is_playing = true;
+            lv_async_call(show_playing, NULL);
+        }
     }
 }
 
@@ -161,5 +187,8 @@ void loop() {
     }
     mqttClient.loop();
 
-
+    if (is_playing && (millis() - last_data_ms > NOT_PLAYING_TIMEOUT_MS)) {
+        is_playing = false;
+        lv_async_call(show_not_playing, NULL);
+    }
 }
