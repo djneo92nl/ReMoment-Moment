@@ -13,7 +13,7 @@ static const int kThumbSize = 120;  // server's proxy_120
 static const int kMaxThumbs = 96;   // matches the artwork task's limit
 static const int kMaxDepth  = 8;
 
-enum class Mode : uint8_t { Home, Artist, Album };
+enum class Mode : uint8_t { Home, Artist, Album, Playlist };
 struct Entry {
     Mode mode;
     int  id;
@@ -26,9 +26,10 @@ static lv_obj_t *title_label;
 static lv_obj_t *favorite_btn;
 static lv_obj_t *tabs_row;
 // Tab order on screen (the Moment puts Radio next to the playlists/collection tabs)
-static const LibView kTabViews[] = {LibView::Recent, LibView::Radio, LibView::Favorites, LibView::Artists};
-static const char *const kTabNames[] = {"Recent", "Radio", "Favorites", "Artists"};
-static const int kTabCount = 4;
+static const LibView kTabViews[] = {LibView::Recent, LibView::Playlists, LibView::Radio, LibView::Favorites,
+                                    LibView::Artists};
+static const char *const kTabNames[] = {"Recent", "Playlists", "Radio", "Favorites", "Artists"};
+static const int kTabCount = 5;
 static lv_obj_t *tab_btns[kTabCount];
 static lv_obj_t *content;  // rebuilt per view
 static lv_obj_t *grid;     // album tiles / artist rows of the current view
@@ -153,6 +154,7 @@ static void on_tab(lv_event_t *e) {
 
 static void on_album(lv_event_t *e) { push(Mode::Album, (int)(intptr_t)lv_event_get_user_data(e)); }
 static void on_artist(lv_event_t *e) { push(Mode::Artist, (int)(intptr_t)lv_event_get_user_data(e)); }
+static void on_playlist(lv_event_t *e) { push(Mode::Playlist, (int)(intptr_t)lv_event_get_user_data(e)); }
 
 static void on_favorite(lv_event_t *) {
     favorite = !favorite;
@@ -163,13 +165,17 @@ static void on_favorite(lv_event_t *) {
 }
 
 // Device -1 = the current device (resolved on the loop task)
+static commands::Type play_type() {
+    return current().mode == Mode::Playlist ? commands::Type::PlayPlaylist : commands::Type::PlayAlbum;
+}
+
 static void on_play_album(lv_event_t *) {
-    commands::post(commands::Type::PlayAlbum, -1, current().id);
+    commands::post(play_type(), -1, current().id);
     nav::to_now_playing();
 }
 
 static void on_play_track(lv_event_t *e) {
-    commands::post(commands::Type::PlayAlbum, -1, current().id, nullptr, (int)(intptr_t)lv_event_get_user_data(e));
+    commands::post(play_type(), -1, current().id, nullptr, (int)(intptr_t)lv_event_get_user_data(e));
     nav::to_now_playing();
 }
 
@@ -182,7 +188,7 @@ static void on_scroll_end(lv_event_t *) {
     if (!more_available || loading_more) return;
     if (lv_obj_get_scroll_bottom(content) > layout.row * 2) return;
     loading_more = true;
-    commands::post(commands::Type::LoadLibrary, -1, (int)LibView::Artists, "more");
+    commands::post(commands::Type::LoadLibrary, -1, (int)tab, "more");
 }
 
 static void render() {
@@ -207,7 +213,10 @@ static void render() {
         commands::post(commands::Type::LoadLibrary, -1, (int)tab);
     } else {
         lv_label_set_text(title_label, "");
-        commands::post(e.mode == Mode::Artist ? commands::Type::LoadArtist : commands::Type::LoadAlbum, -1, e.id);
+        commands::Type load = e.mode == Mode::Artist     ? commands::Type::LoadArtist
+                            : e.mode == Mode::Playlist ? commands::Type::LoadPlaylist
+                                                       : commands::Type::LoadAlbum;
+        commands::post(load, -1, e.id);
     }
     show_message("Loading...");
 }
@@ -225,8 +234,8 @@ static void add_tile(lv_obj_t *parent, const LibItem &it) {
     lv_obj_set_flex_align(tile, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(tile, 4, 0);
     lv_obj_set_style_opa(tile, LV_OPA_60, LV_STATE_PRESSED);
-    lv_obj_add_event_cb(tile, it.kind == LibKind::Artist ? on_artist : on_album, LV_EVENT_CLICKED,
-                        (void *)(intptr_t)it.id);
+    lv_event_cb_t open = it.kind == LibKind::Artist ? on_artist : it.kind == LibKind::Playlist ? on_playlist : on_album;
+    lv_obj_add_event_cb(tile, open, LV_EVENT_CLICKED, (void *)(intptr_t)it.id);
 
     if (size > kThumbSize && it.cover[0]) thumb(tile, size, it.cover, true, true);
     else thumb(tile, size, it.thumb);
@@ -425,12 +434,12 @@ void set_items(LibView view, const LibItem *items, int count, bool append, bool 
     }
 
     if (!grid) {
-        if (count == 0) return show_message(view == LibView::Recent ? "Nothing played yet" : "No artists");
-        view == LibView::Recent ? new_grid() : new_list();
+        if (count == 0) return show_message(view == LibView::Playlists ? "No playlists" : "No artists");
+        view == LibView::Playlists ? new_grid() : new_list();
     }
     for (int i = 0; i < count; i++) {
-        if (items[i].kind == LibKind::Album) add_album_tile(items[i]);
-        else add_artist_row(items[i]);
+        if (items[i].kind == LibKind::Artist) add_artist_row(items[i]);
+        else add_album_tile(items[i]);
     }
 }
 
@@ -459,11 +468,13 @@ static void format_duration(char *buf, size_t size, int seconds) {
 }
 
 void set_album(const LibAlbum &album, const LibTrack *tracks, int count) {
-    if (current().mode != Mode::Album || current().id != album.id) return;
+    Mode expected = album.is_playlist ? Mode::Playlist : Mode::Album;
+    if (current().mode != expected || current().id != album.id) return;
     clear_content();
     lv_label_set_text(title_label, album.name);
     favorite = album.favorite;
     show_favorite();
+    set_visible(favorite_btn, !album.is_playlist);  // favorites are albums and artists only
 
     // Landscape: cover and actions left, tracks right. Portrait: stacked.
     lv_obj_t *body = widgets::box(content);
@@ -514,9 +525,16 @@ void set_album(const LibAlbum &album, const LibTrack *tracks, int count) {
         lv_obj_t *n = widgets::label(r, num, layout.font_small, color::muted());
         lv_obj_align(n, LV_ALIGN_LEFT_MID, 0, 0);
         lv_obj_t *name = widgets::label(r, t.name, layout.font_body, color::text());
-        lv_obj_set_width(name, lv_pct(75));
+        lv_obj_set_width(name, lv_pct(album.is_playlist ? 50 : 75));
         lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
         lv_obj_align(name, LV_ALIGN_LEFT_MID, layout.margin, 0);
+        if (album.is_playlist) {  // mixed artists: show each track's
+            lv_obj_t *a = widgets::label(r, t.artist, layout.font_small, color::muted());
+            lv_obj_set_width(a, lv_pct(30));
+            lv_label_set_long_mode(a, LV_LABEL_LONG_DOT);
+            lv_obj_set_align(a, LV_ALIGN_LEFT_MID);
+            lv_obj_set_x(a, lv_pct(58));
+        }
         lv_obj_t *d = widgets::label(r, dur, layout.font_small, color::muted());
         lv_obj_align(d, LV_ALIGN_RIGHT_MID, 0, 0);
     }
@@ -569,9 +587,10 @@ void build(const Layout &l) {
     lv_obj_set_size(tabs_row, LV_SIZE_CONTENT, l.btn_small);
     lv_obj_align(tabs_row, LV_ALIGN_TOP_MID, 0, l.margin / 2 + l.btn);
     lv_obj_set_flex_flow(tabs_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(tabs_row, l.margin, 0);
+    lv_obj_set_style_pad_column(tabs_row, l.landscape ? l.margin : l.gap, 0);
     for (int i = 0; i < kTabCount; i++) {
-        lv_obj_t *t = widgets::label(tabs_row, kTabNames[i], l.font_body, color::muted());
+        // Five tabs don't fit the 3.5" in the body font
+        lv_obj_t *t = widgets::label(tabs_row, kTabNames[i], l.landscape ? l.font_body : l.font_small, color::muted());
         lv_obj_add_flag(t, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_ext_click_area(t, l.gap);
         lv_obj_add_event_cb(t, on_tab, LV_EVENT_CLICKED, (void *)(intptr_t)kTabViews[i]);

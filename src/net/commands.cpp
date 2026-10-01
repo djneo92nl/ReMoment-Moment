@@ -151,7 +151,8 @@ static const int kMaxTracks = 100;
 
 static ui::LibItem  *items;   // PSRAM, allocated on first use
 static ui::LibTrack *tracks;
-static String        artists_cursor;  // next page of the artist list, "" = none
+static String        artists_cursor;    // next page of the artist list, "" = none
+static String        playlists_cursor;  // next page of the playlist list
 
 static bool ensure_buffers() {
     if (!items) items = (ui::LibItem *)ps_calloc(kMaxItems, sizeof(ui::LibItem));
@@ -180,6 +181,16 @@ static void artist_item(JsonObjectConst a, ui::LibItem &it) {
     strlcpy(it.thumb, a["artwork"]["proxy_120"] | "", sizeof(it.thumb));
     strlcpy(it.cover, a["artwork"]["proxy_320"] | "", sizeof(it.cover));
     it.favorite = a["favorite"] | false;
+}
+
+static void playlist_item(JsonObjectConst a, ui::LibItem &it) {
+    it.kind = ui::LibKind::Playlist;
+    it.id   = a["id"] | 0;
+    strlcpy(it.title, a["name"] | "", sizeof(it.title));
+    int tracks = a["track_count"] | 0;
+    snprintf(it.subtitle, sizeof(it.subtitle), tracks == 1 ? "1 track" : "%d tracks", tracks);
+    strlcpy(it.thumb, a["artwork"]["proxy_120"] | "", sizeof(it.thumb));
+    strlcpy(it.cover, a["artwork"]["proxy_320"] | "", sizeof(it.cover));
 }
 
 static int add_items(JsonArrayConst list, int n, void (*fill)(JsonObjectConst, ui::LibItem &), uint8_t shelf = 0,
@@ -235,6 +246,17 @@ static void load_library(ui::LibView view, bool next_page) {
             ui::library_set_items(view, items, n, false, false);
             break;
         }
+        case ui::LibView::Playlists: {
+            if (next_page && playlists_cursor.isEmpty()) return;
+            String path = "/library/playlists";
+            if (next_page) path += "?cursor=" + playlists_cursor;
+            if (!api::ok(api::get(path.c_str(), res))) return ui::library_load_failed();
+            n = add_items(res["data"], 0, playlist_item);
+            JsonVariantConst next = res["next_cursor"];
+            playlists_cursor = next.isNull() ? String() : next.as<String>();
+            ui::library_set_items(view, items, n, next_page, !playlists_cursor.isEmpty());
+            break;
+        }
         case ui::LibView::Artists: {
             if (next_page && artists_cursor.isEmpty()) return;
             String path = "/library/artists";
@@ -288,6 +310,35 @@ static void load_album(int album_id) {
     ui::library_set_album(album, tracks, n);
 }
 
+static void load_playlist(int playlist_id) {
+    if (!ensure_buffers()) return;
+    JsonDocument res;
+    String path = String("/library/playlists/") + playlist_id;
+    if (model.device()) path += "?device_id=" + String(model.device()->id);
+    if (!api::ok(api::get(path.c_str(), res))) return ui::library_load_failed();
+
+    ui::LibAlbum list = {};
+    list.id          = playlist_id;
+    list.is_playlist = true;
+    strlcpy(list.name, res["name"] | "", sizeof(list.name));
+    strlcpy(list.artist, res["owner"] | "", sizeof(list.artist));
+    strlcpy(list.cover, res["artwork"]["proxy_320"] | "", sizeof(list.cover));
+    list.playable = res["playable"] | false;
+
+    int n = 0;
+    for (JsonObjectConst t : res["tracks"].as<JsonArrayConst>()) {
+        if (n >= kMaxTracks) break;
+        ui::LibTrack &tr = tracks[n++];
+        tr = {};
+        tr.id = t["id"] | 0;
+        strlcpy(tr.name, t["name"] | "", sizeof(tr.name));
+        strlcpy(tr.artist, t["artist_name"] | "", sizeof(tr.artist));
+        tr.duration = t["duration"] | -1;
+        tr.playable = t["playable"] | false;
+    }
+    ui::library_set_album(list, tracks, n);
+}
+
 static void play_from_library(Command c) {
     // -1 = whatever device is current when the command runs
     if (c.device_id < 0) {
@@ -299,6 +350,10 @@ static void play_from_library(Command c) {
     if (c.type == Type::PlayAlbum) {
         path = "library/play-album";
         body["album_id"] = c.value;
+        if (c.value2 > 0) body["start_track_id"] = c.value2;
+    } else if (c.type == Type::PlayPlaylist) {
+        path = "library/play-playlist";
+        body["playlist_id"] = c.value;
         if (c.value2 > 0) body["start_track_id"] = c.value2;
     } else {
         path = "library/play-artist";
@@ -398,6 +453,8 @@ static void run(const Command &c) {
         case Type::LoadLibrary:    load_library((ui::LibView)c.value, c.text[0] != '\0'); break;
         case Type::LoadArtist:     load_artist(c.value); break;
         case Type::LoadAlbum:      load_album(c.value); break;
+        case Type::LoadPlaylist:   load_playlist(c.value); break;
+        case Type::PlayPlaylist:
         case Type::PlayAlbum:
         case Type::PlayArtist:     play_from_library(c); break;
         case Type::FavoriteAlbum:

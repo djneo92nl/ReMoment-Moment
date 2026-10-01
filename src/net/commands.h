@@ -31,6 +31,8 @@ enum class Type : uint8_t {
     FavoriteAlbum,   // value = album id, value2 = 0/1
     FavoriteArtist,  // value = artist id, value2 = 0/1
     LoadSettingsInfo,
+    LoadPlaylist,    // value = playlist id
+    PlayPlaylist,    // value = playlist id, value2 = start track id (0 = from the start)
 };
 
 struct Command {

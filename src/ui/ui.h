@@ -47,8 +47,8 @@ struct Option {
 void details_set_options(int device_id, Section section, const Option *options, int count);
 
 // Library (swipe down from Now Playing). Data is loaded by commands::Type::Load*.
-enum class LibView : uint8_t { Recent, Favorites, Artists, Radio };
-enum class LibKind : uint8_t { Album, Artist, Station };
+enum class LibView : uint8_t { Recent, Favorites, Artists, Radio, Playlists };
+enum class LibKind : uint8_t { Album, Artist, Station, Playlist };
 struct LibItem {
     LibKind kind;
     int     id;
@@ -62,6 +62,7 @@ struct LibItem {
 struct LibTrack {
     int  id;
     char name[64];
+    char artist[48];  // playlists only (albums have one artist)
     int  duration;  // seconds, -1 = unknown
     bool playable;
 };
@@ -74,6 +75,7 @@ struct LibAlbum {
     char cover[192];  // proxy_320 URL
     bool favorite;
     bool playable;
+    bool is_playlist;  // artist = owner, tracks carry their own artist, no favorites
 };
 // `append` adds a page to the list; `more` = another page can be loaded
 void library_set_items(LibView view, const LibItem *items, int count, bool append, bool more);
