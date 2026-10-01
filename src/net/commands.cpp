@@ -287,6 +287,7 @@ static void set_favorite(const Command &c) {
 // ---------------------------------------------------------------------------------
 
 static void run(const Command &c) {
+    Serial.printf("[commands] type %d device %d value %d\n", (int)c.type, c.device_id, c.value);
     switch (c.type) {
         case Type::Play:     post_action(c.device_id, "play"); break;
         case Type::Pause:    post_action(c.device_id, "pause"); break;

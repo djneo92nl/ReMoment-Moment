@@ -62,23 +62,36 @@ static esp_err_t touch_read(uint16_t reg, uint8_t *buf, size_t len) {
 
 static void read_touch(lv_indev_drv_t *, lv_indev_data_t *data) {
     static lv_coord_t last_x = 0, last_y = 0;
+    static uint8_t low_reads = 0;   // consecutive polls with TP_INT low
+    static bool pressed = false;
     data->point.x = last_x;
     data->point.y = last_y;
     data->state   = LV_INDEV_STATE_REL;
 
-    // The controller's "has data" bit sticks after the first touch; TP_INT (low while
-    // touched) is the reliable press/release signal. Only read I2C while it's low.
-    if (gpio_get_level((gpio_num_t)ES3C28P_TOUCH_INT) != 0) return;
+    // The controller's "has data" bit sticks after the first touch and the last point stays
+    // readable, so TP_INT (low while touched) decides. A short glitch on TP_INT would read
+    // as a press at the previous position (ghost taps on the last button used), so a press
+    // only counts once TP_INT has been low for two polls in a row.
+    bool low = gpio_get_level((gpio_num_t)ES3C28P_TOUCH_INT) == 0;
+    low_reads = low ? (uint8_t)min(low_reads + 1, 255) : 0;
 
-    uint8_t info = 0;
-    if (touch_read(kRegTouchInfo, &info, 1) != ESP_OK || !(info & kInfoHasData)) return;
-    uint8_t p[7];
-    if (touch_read(kRegTouchPoint0, p, sizeof(p)) != ESP_OK || !(p[0] & kPointValid)) return;
-    last_x = ((p[0] & 0x3F) << 8) | p[1];
-    last_y = ((p[2] & 0x3F) << 8) | p[3];
+    bool touched = false;
+    if (low_reads >= 2) {
+        uint8_t info = 0, p[7];
+        if (touch_read(kRegTouchInfo, &info, 1) == ESP_OK && (info & kInfoHasData) &&
+            touch_read(kRegTouchPoint0, p, sizeof(p)) == ESP_OK && (p[0] & kPointValid)) {
+            last_x  = ((p[0] & 0x3F) << 8) | p[1];
+            last_y  = ((p[2] & 0x3F) << 8) | p[3];
+            touched = true;
+        }
+    }
+    if (touched != pressed) {
+        pressed = touched;
+        Serial.printf("[touch] %s %d,%d\n", touched ? "press" : "release", last_x, last_y);
+    }
     data->point.x = last_x;
     data->point.y = last_y;
-    data->state   = LV_INDEV_STATE_PR;
+    data->state   = touched ? LV_INDEV_STATE_PR : LV_INDEV_STATE_REL;
 }
 
 static void touch_init() {

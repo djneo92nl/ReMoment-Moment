@@ -135,22 +135,32 @@ static bool download(const String &url, const String &path) {
     HTTPClient http;
     http.setTimeout(kHttpTimeoutMs);
     http.setConnectTimeout(kHttpTimeoutMs);
-    if (!http.begin(client, url)) return false;
+    if (!http.begin(client, url)) {
+        Serial.printf("[artwork] bad URL %s\n", url.c_str());
+        return false;
+    }
 
     bool ok = false;
     int status = http.GET();
     if (status == HTTP_CODE_OK) {
         File f = SD_MMC.open(tmp, FILE_WRITE);
         if (f) {
-            ok = http.writeToStream(&f) > 0;
+            int written = http.writeToStream(&f);
+            ok = written > 0;
             f.close();
+            if (!ok) Serial.printf("[artwork] download %s: %d\n", url.c_str(), written);
+        } else {
+            Serial.printf("[artwork] can't write %s\n", tmp.c_str());
         }
     } else {
         Serial.printf("[artwork] GET %s: %d\n", url.c_str(), status);
     }
     http.end();
 
-    if (ok) ok = SD_MMC.rename(tmp, path);
+    if (ok && !SD_MMC.rename(tmp, path)) {
+        Serial.printf("[artwork] rename to %s failed\n", path.c_str());
+        ok = false;
+    }
     if (!ok) SD_MMC.remove(tmp);
     return ok;
 }

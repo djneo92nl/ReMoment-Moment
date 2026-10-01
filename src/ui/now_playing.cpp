@@ -263,7 +263,8 @@ static void crossfade_to(Crossfade &cf, const lv_img_dsc_t *image, uint32_t ms) 
         lv_img_set_zoom(next, (uint32_t)cf.target * LV_IMG_ZOOM_NONE / image->header.w);
     }
     lv_obj_set_style_img_opa(next, LV_OPA_TRANSP, 0);
-    lv_obj_move_foreground(next);
+    // Only above its sibling layer: the background layers must stay behind the rest of the screen
+    if (lv_obj_get_index(next) < lv_obj_get_index(old_front)) lv_obj_swap(next, old_front);
     fade(next, true, ms);
     fade(old_front, false, ms);
     cf.front = 1 - cf.front;

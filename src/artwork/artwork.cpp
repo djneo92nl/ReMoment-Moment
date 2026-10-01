@@ -104,12 +104,21 @@ static const lv_img_dsc_t *load(Kind &kind, cache::Kind cache_kind, const char *
     // The free slot may still be fading out on screen: take it off first
     ui::artwork_release(&slot.dsc);
 
+    const char *what = cache_kind == cache::Kind::Cover ? "cover" : "background";
+    if (!*url) {
+        kind.shown = -1;
+        return nullptr;
+    }
+    unsigned long start = millis();
     String path = cache::fetch(cache_kind, url);
     if (path.isEmpty() || !decode(path, slot)) {
+        Serial.printf("[artwork] %s failed: %s\n", what, path.isEmpty() ? url : path.c_str());
         kind.shown  = -1;
         kind.url[0] = '\0';  // retry on the next request
         return nullptr;
     }
+    Serial.printf("[artwork] %s %dx%d in %lu ms (%s)\n", what, slot.dsc.header.w, slot.dsc.header.h, millis() - start,
+                  path.c_str());
     kind.shown = next;
     return &slot.dsc;
 }
