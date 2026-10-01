@@ -86,8 +86,29 @@ static void log_network() {
 // attempt at a saved network, the call can fail and no setup network is broadcast while the
 // portal counts as open. Seen on the ES3C28P away from home. Restart the AP ourselves.
 static void ensure_setup_ap() {
-    static unsigned long last_try_ms = 0;
-    if (!gwPortalActive() || WiFi.softAPSSID().length() > 0) return;
+    static unsigned long last_try_ms = 0, last_log_ms = 0;
+    bool portal = gwPortalActive();
+
+    // While the setup network is open without an uplink, the station side must not keep
+    // retrying the saved network on its own: each attempt scans every channel and drags the
+    // AP along, so phones see it but can't finish joining. garnet_web still retries saved
+    // networks itself every 2 minutes when nobody is on the AP.
+    bool quiet = portal && !network_up();
+    if (quiet && WiFi.getAutoReconnect()) {
+        WiFi.setAutoReconnect(false);
+        WiFi.disconnect(false);
+        Serial.println("[net] setup AP open: station auto-reconnect off");
+    } else if (!quiet && !WiFi.getAutoReconnect()) {
+        WiFi.setAutoReconnect(true);
+    }
+
+    if (portal && millis() - last_log_ms > 10000) {
+        last_log_ms = millis();
+        Serial.printf("[net] setup AP \"%s\" ch %d, %d connected, station status %d\n", WiFi.softAPSSID().c_str(),
+                      WiFi.channel(), WiFi.softAPgetStationNum(), (int)WiFi.status());
+    }
+
+    if (!portal || WiFi.softAPSSID().length() > 0) return;
     if (last_try_ms != 0 && millis() - last_try_ms < 5000) return;
     last_try_ms = millis();
 
