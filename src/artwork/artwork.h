@@ -2,6 +2,7 @@
 // Runs in its own task so downloads and decoding never block MQTT or the LVGL task.
 #pragma once
 
+#include <ArduinoJson.h>
 #include <stdint.h>
 
 namespace artwork {
@@ -12,6 +13,10 @@ struct Request {
     bool     has_accent;
     uint32_t accent;           // 0xRRGGBB from artwork.safe_colors[0]
 };
+
+// Background URL for this screen from an artwork object: `proxy_bg_{w}x{h}` when the server
+// rendered this size, else the default `proxy_bg` (1024x600).
+const char *background_url(JsonObjectConst artwork);
 
 // Starts the task. Without an SD card artwork stays off and the UI shows a notice.
 void begin(bool sd_available);

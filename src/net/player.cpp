@@ -38,7 +38,7 @@ static bool parse_hex_color(const char *s, uint32_t &out) {
 static void parse_artwork(JsonObjectConst art, artwork::Request &req) {
     req = {};
     strlcpy(req.cover_url, art["proxy_320"] | "", sizeof(req.cover_url));
-    strlcpy(req.background_url, art["proxy_bg"] | "", sizeof(req.background_url));
+    strlcpy(req.background_url, artwork::background_url(art), sizeof(req.background_url));
     req.has_accent = parse_hex_color(art["safe_colors"][0] | "", req.accent);
 }
 

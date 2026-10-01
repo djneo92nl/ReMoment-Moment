@@ -5,6 +5,7 @@
 #include <SD_MMC.h>
 #include <lvgl.h>
 
+#include "board/board.h"
 #include "cache.h"
 #include "model.h"
 #include "net/api.h"
@@ -112,7 +113,20 @@ static const lv_img_dsc_t *load(Kind &kind, cache::Kind cache_kind, const char *
     unsigned long start = millis();
     String path = cache::fetch(cache_kind, url);
     unsigned long fetched = millis();
-    if (path.isEmpty() || !decode(path, slot)) {
+    bool ok = !path.isEmpty() && decode(path, slot);
+
+    // Backgrounds are cached as {hash}.jpg whatever their size: a file cached before the
+    // server rendered this screen's size is the 1024x600 one. Replace it once.
+    char sized[24];
+    snprintf(sized, sizeof(sized), "bg_%ux%u.", board::info().width, board::info().height);
+    if (ok && cache_kind == cache::Kind::Background && strstr(url, sized) &&
+        (slot.dsc.header.w != board::info().width || slot.dsc.header.h != board::info().height)) {
+        cache::forget(cache_kind, path);
+        path = cache::fetch(cache_kind, url);
+        ok   = !path.isEmpty() && decode(path, slot);
+    }
+
+    if (!ok) {
         if (!path.isEmpty()) cache::forget(cache_kind, path);  // corrupt file: download again next time
         Serial.printf("[artwork] %s failed: %s\n", what, path.isEmpty() ? url : path.c_str());
         kind.shown  = -1;
@@ -123,6 +137,13 @@ static const lv_img_dsc_t *load(Kind &kind, cache::Kind cache_kind, const char *
                   slot.dsc.header.h, fetched - start, millis() - fetched, path.c_str());
     kind.shown = next;
     return &slot.dsc;
+}
+
+const char *background_url(JsonObjectConst art) {
+    char key[24];
+    snprintf(key, sizeof(key), "proxy_bg_%ux%u", board::info().width, board::info().height);
+    const char *sized = art[key] | "";
+    return *sized ? sized : (art["proxy_bg"] | "");
 }
 
 // ---- Thumbnails for the library screens ------------------------------------------
@@ -219,7 +240,7 @@ static bool precache_page() {
     for (JsonObjectConst item : page["data"].as<JsonArrayConst>()) {
         if (busy()) return false;  // a track change or a library screen wins; resume this page later
         if (!cache::nearly_full(cache::Kind::Cover)) cache::fetch(cache::Kind::Cover, item["proxy_320"] | "", false);
-        if (!cache::nearly_full(cache::Kind::Background)) cache::fetch(cache::Kind::Background, item["proxy_bg"] | "", false);
+        if (!cache::nearly_full(cache::Kind::Background)) cache::fetch(cache::Kind::Background, background_url(item), false);
         if (!cache::nearly_full(cache::Kind::Thumb)) cache::fetch(cache::Kind::Thumb, item["proxy_120"] | "", false);
     }
 
