@@ -36,4 +36,10 @@
 // RGB status LED (WS2812, single wire)
 #define ES3C28P_RGB_LED     40
 
-// Not used yet: ES8311 audio (I2S MCK 17, SCK 18, DO 16, LRC 21, DI 15, EN 1)
+// ES8311 codec (I2C 0x18 on the touch bus) and speaker amplifier
+#define ES3C28P_I2S_MCK     17
+#define ES3C28P_I2S_SCK     18  // bit clock
+#define ES3C28P_I2S_DO      16  // to the speaker
+#define ES3C28P_I2S_LRC     21  // word select
+#define ES3C28P_I2S_DI      15  // from the mic (unused)
+#define ES3C28P_AUDIO_EN    1   // amplifier, low = on

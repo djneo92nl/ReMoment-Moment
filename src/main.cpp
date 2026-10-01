@@ -7,6 +7,7 @@
 #include <Arduino.h>
 #include <SD_MMC.h>
 #include <WiFi.h>
+#include <esp_mac.h>
 #include <garnet_web.h>
 
 #include "app_config.h"
@@ -67,6 +68,37 @@ static void restart_flow() {
 static String web_password_hint() {
     if (gsNamespaceExists("gw_auth")) return "Settings password: the one you set";
     return String("Settings password: ") + WEB_DEFAULT_PASSWORD;
+}
+
+// Logs network / setup-portal transitions (garnet_web itself is silent at our log level)
+static void log_network() {
+    static int last_mode = -1, last_portal = -1;
+    int mode = (int)gwNetMode(), portal = gwPortalActive();
+    if (mode == last_mode && portal == last_portal) return;
+    last_mode = mode;
+    last_portal = portal;
+    static const char *kModes[] = {"offline", "ethernet", "wifi", "portal"};
+    Serial.printf("[net] %s, setup AP %s%s%s, IP %s\n", mode < 4 ? kModes[mode] : "?", portal ? "on \"" : "off",
+                  portal ? WiFi.softAPSSID().c_str() : "", portal ? "\"" : "", gwNetIP().toString().c_str());
+}
+
+// garnet_web (v0.1.0) doesn't check WiFi.softAP(): when the portal opens right after a failed
+// attempt at a saved network, the call can fail and no setup network is broadcast while the
+// portal counts as open. Seen on the ES3C28P away from home. Restart the AP ourselves.
+static void ensure_setup_ap() {
+    static unsigned long last_try_ms = 0;
+    if (!gwPortalActive() || WiFi.softAPSSID().length() > 0) return;
+    if (last_try_ms != 0 && millis() - last_try_ms < 5000) return;
+    last_try_ms = millis();
+
+    uint8_t mac[6] = {};
+    esp_read_mac(mac, ESP_MAC_BASE);
+    char ssid[32];
+    snprintf(ssid, sizeof(ssid), "%s-%02X%02X", DEVICE_NAME, mac[4], mac[5]);  // garnet_web's AP name
+    WiFi.disconnect(false);  // stop the background join attempt that blocks the AP
+    WiFi.mode(WIFI_AP_STA);
+    bool ok = WiFi.softAP(ssid);
+    Serial.printf("[net] setup AP was not up; restarting \"%s\": %s\n", ssid, ok ? "ok" : "failed");
 }
 
 static void step_network() {
@@ -176,6 +208,8 @@ void setup() {
 
 void loop() {
     gwLoop();
+    ensure_setup_ap();
+    log_network();
 
     if (settings::take_rediscover_request()) restart_flow();
 

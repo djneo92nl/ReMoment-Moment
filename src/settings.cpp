@@ -3,6 +3,7 @@
 #include <Preferences.h>
 #include <garnet_settings.h>
 
+#include "board/board.h"
 #include "model.h"
 
 namespace settings {
@@ -31,6 +32,17 @@ static const GsField kServerFields[] = {
     gsButton("find", "Find server again", request_rediscover),
     gsButton("forget", "Forget registration", forget_registration,
              "The server will see this screen as a new client that needs approval again."),
+};
+
+// ---- Sound -----------------------------------------------------------------------
+
+static const char *kSoundGroup = "rm_sound";
+
+static void on_sound_changed(const GsField &) { board::set_click_volume(gsGetInt(kSoundGroup, "click")); }
+
+static const GsField kSoundFields[] = {
+    gsWithHelp(gsNumber("click", "Tap sound volume", 50, 0, 100, 10, on_sound_changed),
+               "0 = off. Only on screens with a speaker."),
 };
 
 // ---- Status (read-only, replaces the old /status JSON endpoint) -------------
@@ -80,11 +92,14 @@ static const GsField kStatusFields[] = {
 };
 
 static const GsGroup kServerGroupDef = gsGroup(kServerGroup, "Server", "server", kServerFields, "ReMoment");
+static const GsGroup kSoundGroupDef  = gsGroup(kSoundGroup, "Sound", "sound", kSoundFields, "ReMoment");
 static const GsGroup kStatusGroupDef = gsGroup("rm_status", "Status", "info", kStatusFields, "ReMoment");
 
 void register_groups() {
     gsRegister(kStatusGroupDef);
     gsRegister(kServerGroupDef);
+    gsRegister(kSoundGroupDef);
+    board::set_click_volume(gsGetInt(kSoundGroup, "click"));
 }
 
 String server_url() { return gsGetString(kServerGroup, "url"); }

@@ -41,6 +41,8 @@ void set_backlight(uint8_t percent) {
 
 void set_led(uint32_t) {}  // no status LED on this board
 
+void set_click_volume(uint8_t) {}  // no speaker
+
 float battery_voltage() {
     // 10-bit ADC behind a 1:3 divider, 3.3 V reference
     float v = IO_EXTENSION_Adc_Input() * 3 * 3.3f / 1023.0f;

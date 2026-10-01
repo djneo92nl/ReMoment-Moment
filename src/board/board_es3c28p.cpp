@@ -10,6 +10,7 @@
 #include "board.h"
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
+#include "es3c28p_audio.h"
 #include "es3c28p_panel.h"
 #include "es3c28p_pins.h"
 #include "esp_timer.h"
@@ -28,6 +29,7 @@ static SemaphoreHandle_t      lvgl_mux;
 static lv_disp_draw_buf_t     draw_buf;
 static lv_disp_drv_t          disp_drv;
 static lv_indev_drv_t         indev_drv;
+static i2c_master_bus_handle_t i2c_bus;  // touch controller and audio codec
 static i2c_master_dev_handle_t touch_dev;
 static uint8_t touch_points = 1;  // reported by the controller at init (max simultaneous points)
 
@@ -112,14 +114,13 @@ static void touch_init() {
     bus_cfg.clk_source        = I2C_CLK_SRC_DEFAULT;
     bus_cfg.glitch_ignore_cnt = 7;
     bus_cfg.flags.enable_internal_pullup = true;
-    i2c_master_bus_handle_t bus;
-    ESP_ERROR_CHECK(i2c_new_master_bus(&bus_cfg, &bus));
+    ESP_ERROR_CHECK(i2c_new_master_bus(&bus_cfg, &i2c_bus));
 
     i2c_device_config_t dev_cfg = {};
     dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
     dev_cfg.device_address  = ES3C28P_TOUCH_ADDR;
     dev_cfg.scl_speed_hz    = 400000;
-    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus, &dev_cfg, &touch_dev));
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(i2c_bus, &dev_cfg, &touch_dev));
 
     uint8_t max_touches = 0;
     if (touch_read(kRegMaxTouches, &max_touches, 1) == ESP_OK) {
@@ -128,6 +129,13 @@ static void touch_init() {
     } else {
         Serial.println("[board] touch controller not answering yet");
     }
+}
+
+// Tick on taps of things that react (not on bare screen background)
+static void on_input_feedback(lv_indev_drv_t *, uint8_t event) {
+    if (event != LV_EVENT_CLICKED) return;
+    lv_obj_t *obj = lv_indev_get_obj_act();
+    if (obj && lv_obj_get_parent(obj)) es3c28p_audio::click();
 }
 
 // ---- LVGL task --------------------------------------------------------------------
@@ -172,6 +180,7 @@ void init() {
     lv_indev_drv_init(&indev_drv);
     indev_drv.type    = LV_INDEV_TYPE_POINTER;
     indev_drv.read_cb = read_touch;
+    indev_drv.feedback_cb = on_input_feedback;
     lv_indev_drv_register(&indev_drv);
 
     esp_timer_create_args_t tick_args = {};
@@ -185,6 +194,7 @@ void init() {
     xTaskCreatePinnedToCore(lvgl_task, "lvgl", 6 * 1024, nullptr, 2, nullptr, 1);
 
     set_backlight(100);
+    es3c28p_audio::init(i2c_bus);
 }
 
 const Info &info() { return kInfo; }
@@ -205,6 +215,8 @@ void set_led(uint32_t rgb) {
     current = rgb;
     rgbLedWrite(ES3C28P_RGB_LED, ((rgb >> 16) & 0xFF) / 4, ((rgb >> 8) & 0xFF) / 4, (rgb & 0xFF) / 4);
 }
+
+void set_click_volume(uint8_t volume) { es3c28p_audio::set_volume(volume); }
 
 float battery_voltage() {
     // Divider ratio not yet confirmed on hardware; reads ~0 V without a battery

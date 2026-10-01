@@ -27,6 +27,9 @@ void set_backlight(uint8_t percent);
 // Status LED colour as 0xRRGGBB, 0 = off. No-op on boards without one.
 void set_led(uint32_t rgb);
 
+// Short UI feedback sound (taps). `volume` 0-100, 0 = off. No-op without a speaker.
+void set_click_volume(uint8_t volume);
+
 // Battery voltage in volts, or 0 when the board can't measure it.
 float battery_voltage();
 
