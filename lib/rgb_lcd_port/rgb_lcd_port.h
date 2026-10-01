@@ -41,7 +41,7 @@
 #define EXAMPLE_RGB_BIT_PER_PIXEL       (16)   ///< RGB interface color depth
 #define EXAMPLE_RGB_DATA_WIDTH          (16)   ///< Data width for RGB interface
 #define EXAMPLE_LCD_RGB_BUFFER_NUMS     (1)    ///< Single framebuffer — no buffer swap timing issues
-#define EXAMPLE_RGB_BOUNCE_BUFFER_SIZE  (EXAMPLE_LCD_H_RES * 10) ///< Bounce buffer protects LCD DMA from WiFi PSRAM contention
+#define EXAMPLE_RGB_BOUNCE_BUFFER_SIZE  (EXAMPLE_LCD_H_RES * 15) ///< Bounce buffer: slack for the refill ISR under PSRAM load (20 lines + SRAM draw buffer left WiFi without memory)
 
 /**
  * @brief GPIO Pins for RGB LCD Signals

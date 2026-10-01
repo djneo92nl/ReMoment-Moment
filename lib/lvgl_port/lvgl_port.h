@@ -40,15 +40,17 @@
  *
  */
 
-#define CONFIG_EXAMPLE_LVGL_PORT_BUF_PSRAM 1
-#define CONFIG_EXAMPLE_LVGL_PORT_BUF_INTERNAL 0
+#define CONFIG_EXAMPLE_LVGL_PORT_BUF_PSRAM 0
+/* ReMoment: draw in internal SRAM: rendering in PSRAM and then copying into the PSRAM
+ * framebuffer doubles the PSRAM traffic the RGB panel DMA depends on. */
+#define CONFIG_EXAMPLE_LVGL_PORT_BUF_INTERNAL 1
 
 #if CONFIG_EXAMPLE_LVGL_PORT_BUF_PSRAM
 #define LVGL_PORT_BUFFER_MALLOC_CAPS    (MALLOC_CAP_SPIRAM)
 #elif CONFIG_EXAMPLE_LVGL_PORT_BUF_INTERNAL
 #define LVGL_PORT_BUFFER_MALLOC_CAPS    (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
 #endif
-#define LVGL_PORT_BUFFER_HEIGHT         (100)
+#define LVGL_PORT_BUFFER_HEIGHT         (20)
 
 /**
  * Avoid tering related configurations, can be adjusted by users.

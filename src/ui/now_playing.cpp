@@ -84,11 +84,28 @@ static void show_times() {
     lv_label_set_text(duration_label, buf);
 }
 
+// With a known duration the bar steps once a second (about 2 px on the 7"), which reads as
+// steady motion. No animation: continuous redraws brought the RGB panel glitches back.
+// Without a duration it shows the server's percentage.
+static void show_bar(bool animate) {
+    // Range only when it changes: setting it redraws the whole bar, not just the new pixels
+    static int range = -1;
+    int wanted = shown.duration > 0 ? shown.duration : 100;
+    if (wanted != range) {
+        lv_bar_set_range(progress_bar, 0, wanted);
+        range = wanted;
+    }
+    if (shown.duration > 0) {
+        lv_bar_set_value(progress_bar, LV_MIN(shown.elapsed, shown.duration), animate ? LV_ANIM_ON : LV_ANIM_OFF);
+    }
+}
+
 // /progress is a percentage (1% of a 4 minute track is 2.4 s): count seconds locally
 static void tick_elapsed(lv_timer_t *) {
     if (shown.state != PlayState::Playing || shown.duration <= 0 || shown.elapsed >= shown.duration) return;
     shown.elapsed++;
     show_times();
+    show_bar(false);
 }
 
 // ---- Controls -------------------------------------------------------------------
@@ -491,9 +508,11 @@ void update(const Device &d, uint8_t what) {
         lv_label_set_text(track_label, active && d.track[0] ? d.track : "-");
         lv_label_set_text(artist_label, active ? d.artist : "");
         lv_label_set_text(album_label, active ? d.album : "");
+        if (shown.duration != (active ? d.duration : -1)) shown.elapsed = d.progress * LV_MAX(d.duration, 0) / 100;
         shown.duration = active ? d.duration : -1;
         if (!active) shown.elapsed = 0;
         show_times();
+        show_bar(false);
         // Dim the cover while nothing plays
         lv_obj_set_style_opa(cover_box, active ? LV_OPA_COVER : LV_OPA_50, 0);
         if (!active) lv_bar_set_value(progress_bar, 0, LV_ANIM_OFF);
@@ -503,12 +522,15 @@ void update(const Device &d, uint8_t what) {
         show_play_state();
     }
     if (what & kUpdateProgress) {
-        lv_bar_set_value(progress_bar, d.progress, LV_ANIM_OFF);  // an animation per update keeps redrawing
         // Resync the local clock only when it drifted further than the percentage's resolution
         if (shown.duration > 0) {
             int from_server = d.progress * shown.duration / 100;
-            if (abs(from_server - shown.elapsed) > shown.duration / 100 + 1) shown.elapsed = from_server;
+            bool jump = abs(from_server - shown.elapsed) > shown.duration / 100 + 1;
+            if (jump) shown.elapsed = from_server;
             show_times();
+            if (jump) show_bar(false);
+        } else {
+            lv_bar_set_value(progress_bar, d.progress, LV_ANIM_OFF);
         }
     }
     if (what & kUpdateVolume) {
