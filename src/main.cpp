@@ -1,294 +1,174 @@
 /*
  * ReMomentClient — touch remote for the ReMoment server.
+ *
+ * Boot flow: WiFi (garnet_web, setup portal when needed) -> find server (settings or mDNS)
+ * -> register and wait for approval -> assigned devices -> MQTT now playing.
  */
 #include <Arduino.h>
-#include <ArduinoJson.h>
-#include <PubSubClient.h>
-#include <WebServer.h>
+#include <SD_MMC.h>
 #include <WiFi.h>
-#include <esp_system.h>
-#include <esp_wifi.h>
+#include <garnet_web.h>
 
-#include "config.h"
-#include "io_extension.h"
-#include "lvgl_port.h"
+#include "app_config.h"
+#include "board/board.h"
+#include "model.h"
+#include "net/player.h"
+#include "net/registration.h"
+#include "net/server.h"
+#include "settings.h"
 #include "ui/ui.h"
-#include "user_sd.h"
 
-#define STR_(x) #x
-#define STR(x)  STR_(x)
-#define PLAYER_TOPIC(sub) "remoment/player/" STR(PLAYER_ID) "/" sub
+Model model;
 
-static const char *TOPIC_DATA     = PLAYER_TOPIC("data");
-static const char *TOPIC_PROGRESS = PLAYER_TOPIC("progress");
+static const unsigned long kDiscoverIntervalMs       = 10000;
+static const unsigned long kDeviceRefreshIntervalMs  = 5UL * 60 * 1000;
+static const unsigned long kBatterySampleIntervalMs  = 5000;
 
-static const unsigned long NOT_PLAYING_TIMEOUT_MS     = 15000;
-static const unsigned long MQTT_RECONNECT_INTERVAL_MS = 10000;
-static const unsigned long BATTERY_SAMPLE_INTERVAL_MS = 5000;
+static unsigned long last_discover_ms       = 0;
+static unsigned long last_device_refresh_ms = 0;
+static unsigned long last_battery_ms        = 0;
 
-static const float BATTERY_V_MIN = 3.0f;
-static const float BATTERY_V_MAX = 4.2f;
-
-static WiFiClient   wifi_client;
-static PubSubClient mqtt_client(wifi_client);
-static WebServer    debug_server(80);
-
-// Fixed buffers to avoid heap fragmentation
-static char track_artist[64];
-static char track_name[64];
-static int  track_progress = 0;  // 0-100
-
-static bool          is_playing   = false;
-static unsigned long last_data_ms = 0;  // millis() of last received MQTT data
-static unsigned long last_mqtt_attempt_ms = 0;
-
-static const char *active_screen = "startup";
-static bool        sd_available  = false;
-
-// Battery is sampled in loop() so the debug endpoint never blocks on I2C
-static float         battery_voltage = 0.0f;
-static unsigned long last_battery_ms = 0;
-
-// ---------------------------------------------------------------------------
-// UI — LVGL runs in its own task, so every widget access must hold the port mutex
-// ---------------------------------------------------------------------------
-
-static void ui_show_track() {
-    if (!lvgl_port_lock(-1)) return;
-    active_screen = "now_playing";
-    lv_label_set_text(ui_track_name, track_name);
-    lv_label_set_text(ui_Artist, track_artist);
-    lvgl_port_unlock();
+// Only touch the status screen when its text actually changes
+static void status(const char *message, const char *detail = nullptr, const char *code = nullptr) {
+    static String last;
+    String key = String(message) + '\n' + (detail ? detail : "") + '\n' + (code ? code : "");
+    if (key == last) return;
+    last = key;
+    ui::show_status(message, detail, code);
 }
 
-static void ui_show_progress() {
-    if (!lvgl_port_lock(-1)) return;
-    lv_slider_set_value(uic_playing_progress, track_progress, LV_ANIM_ON);
-    lvgl_port_unlock();
+static bool network_up() {
+    GwNetMode mode = gwNetMode();
+    return mode == GwNetMode::WiFi || mode == GwNetMode::Ethernet;
 }
 
-static void ui_set_playing(bool playing) {
-    if (!lvgl_port_lock(-1)) return;
-    if (playing) {
-        lv_obj_set_style_img_opa(ui_album_art, LV_OPA_COVER, 0);
+static void enter_running() {
+    model.phase = Phase::Running;
+    last_device_refresh_ms = millis();
+    player::device_changed();
+    ui::show_now_playing();
+}
+
+static void restart_flow() {
+    registration::reset();
+    model.server_url[0] = '\0';
+    model.mqtt_host[0]  = '\0';
+    model.phase         = Phase::Network;
+    last_discover_ms    = 0;
+    player::device_changed();
+}
+
+static void step_network() {
+    if (network_up()) {
+        model.phase = Phase::Discovering;
+        return;
+    }
+    if (gwPortalActive()) {
+        String detail = "Then open http://" + gwNetIP().toString() + " to choose your network";
+        String message = "Connect to WiFi \"" + WiFi.softAPSSID() + "\"";
+        status(message.c_str(), detail.c_str());
     } else {
-        lv_label_set_text(ui_track_name, "—");  // em dash
-        lv_label_set_text(ui_Artist, "");
-        lv_slider_set_value(uic_playing_progress, 0, LV_ANIM_OFF);
-        lv_obj_set_style_img_opa(ui_album_art, LV_OPA_50, 0);
-    }
-    lvgl_port_unlock();
-}
-
-static void mark_data_received() {
-    last_data_ms = millis();
-    if (!is_playing) {
-        is_playing = true;
-        ui_set_playing(true);
+        status("Connecting to WiFi");
     }
 }
 
-// ---------------------------------------------------------------------------
-// Battery
-// ---------------------------------------------------------------------------
-
-static void sample_battery() {
-    // 10-bit ADC behind a 1:3 divider, 3.3 V reference
-    float v = IO_EXTENSION_Adc_Input() * 3 * 3.3f / 1023.0f;
-    battery_voltage = min(v, BATTERY_V_MAX);
-}
-
-static int battery_percent() {
-    int pct = (int)((battery_voltage - BATTERY_V_MIN) / (BATTERY_V_MAX - BATTERY_V_MIN) * 100.0f);
-    return constrain(pct, 0, 100);
-}
-
-// ---------------------------------------------------------------------------
-// Debug HTTP endpoint: GET /status
-// ---------------------------------------------------------------------------
-
-static const char *reset_reason_str() {
-    switch (esp_reset_reason()) {
-        case ESP_RST_POWERON:   return "power_on";
-        case ESP_RST_SW:        return "software";
-        case ESP_RST_PANIC:     return "panic";
-        case ESP_RST_INT_WDT:   return "interrupt_watchdog";
-        case ESP_RST_TASK_WDT:  return "task_watchdog";
-        case ESP_RST_WDT:       return "watchdog";
-        case ESP_RST_DEEPSLEEP: return "deep_sleep";
-        case ESP_RST_BROWNOUT:  return "brownout";
-        case ESP_RST_EXT:       return "external";
-        default:                return "unknown";
-    }
-}
-
-static void handle_debug_status() {
-    JsonDocument doc;
-
-    doc["player"]   = PLAYER_ID;
-    doc["screen"]   = active_screen;
-    doc["playing"]  = is_playing;
-    doc["track"]    = track_name;
-    doc["artist"]   = track_artist;
-    doc["progress"] = track_progress;
-    doc["uptime_s"] = millis() / 1000;
-
-    JsonObject wifi = doc["wifi"].to<JsonObject>();
-    wifi["ssid"]    = WiFi.SSID();
-    wifi["ip"]      = WiFi.localIP().toString();
-    wifi["mac"]     = WiFi.macAddress();
-    wifi["rssi"]    = WiFi.RSSI();
-    wifi["channel"] = WiFi.channel();
-
-    JsonObject mqtt = doc["mqtt"].to<JsonObject>();
-    mqtt["connected"] = mqtt_client.connected();
-    if (last_data_ms > 0) {
-        mqtt["seconds_since_last_msg"] = (millis() - last_data_ms) / 1000;
-    } else {
-        mqtt["seconds_since_last_msg"] = nullptr;
-    }
-
-    JsonObject cpu = doc["cpu"].to<JsonObject>();
-    cpu["freq_mhz"]     = ESP.getCpuFreqMHz();
-    cpu["temp_c"]       = temperatureRead();
-    cpu["reset_reason"] = reset_reason_str();
-    cpu["rtos_tasks"]   = uxTaskGetNumberOfTasks();
-
-    JsonObject mem = doc["memory"].to<JsonObject>();
-    mem["heap_free"]     = ESP.getFreeHeap();
-    mem["heap_total"]    = ESP.getHeapSize();
-    mem["heap_min_free"] = ESP.getMinFreeHeap();
-    mem["psram_free"]    = ESP.getFreePsram();
-    mem["psram_total"]   = ESP.getPsramSize();
-    mem["sketch_size"]   = ESP.getSketchSize();
-    mem["sketch_free"]   = ESP.getFreeSketchSpace();
-
-    JsonObject bat = doc["battery"].to<JsonObject>();
-    if (battery_voltage > 0.0f) {
-        bat["voltage"] = serialized(String(battery_voltage, 2));
-        bat["percent"] = battery_percent();
-    } else {
-        bat["voltage"] = nullptr;
-        bat["percent"] = nullptr;
-    }
-
-    JsonObject sd = doc["sd"].to<JsonObject>();
-    sd["installed"] = sd_available;
-    if (sd_available) {
-        uint64_t total_kb = 0, free_kb = 0;
-        if (read_sd_capacity(&total_kb, &free_kb) == ESP_OK) {
-            sd["total_mb"] = (unsigned long)(total_kb / 1024);
-            sd["free_mb"]  = (unsigned long)(free_kb / 1024);
-        }
-    }
-
-    String response;
-    serializeJsonPretty(doc, response);
-    debug_server.send(200, "application/json", response);
-}
-
-// ---------------------------------------------------------------------------
-// Network
-// ---------------------------------------------------------------------------
-
-static void wifi_connect() {
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-    Serial.print("Connecting to WiFi");
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-    }
-    Serial.printf("\nConnected! IP: %s\n", WiFi.localIP().toString().c_str());
-
-    esp_wifi_set_ps(WIFI_PS_MIN_MODEM);  // Modem sleeps between beacons, reduces PSRAM bus contention
-    WiFi.setTxPower(WIFI_POWER_15dBm);
-}
-
-static void mqtt_callback(char *topic, byte *payload, unsigned int length) {
-    if (strcmp(topic, TOPIC_DATA) == 0) {
-        JsonDocument doc;
-        if (deserializeJson(doc, payload, length)) return;
-
-        strlcpy(track_artist, doc["artist"] | "", sizeof(track_artist));
-        strlcpy(track_name, doc["track"] | "", sizeof(track_name));
-        ui_show_track();
-        mark_data_received();
-    } else if (strcmp(topic, TOPIC_PROGRESS) == 0) {
-        // Plain numeric payload, 0-100
-        char value[8];
-        if (length >= sizeof(value)) return;
-        memcpy(value, payload, length);
-        value[length] = '\0';
-
-        track_progress = constrain(atoi(value), 0, 100);
-        ui_show_progress();
-        mark_data_received();
-    }
-}
-
-static void mqtt_connect() {
-    if (mqtt_client.connected()) return;
+static void step_discovering() {
+    String url = settings::server_url();
+    status("Looking for the ReMoment server", url.isEmpty() ? "Searching the network" : url.c_str());
 
     unsigned long now = millis();
-    if (last_mqtt_attempt_ms != 0 && now - last_mqtt_attempt_ms < MQTT_RECONNECT_INTERVAL_MS) return;
-    last_mqtt_attempt_ms = now;
+    if (last_discover_ms != 0 && now - last_discover_ms < kDiscoverIntervalMs) return;
+    last_discover_ms = now;
+    if (server::discover()) model.phase = Phase::Registering;
+}
 
-    if (mqtt_client.connect(MQTT_CLIENT_ID)) {
-        Serial.println("MQTT connected");
-        mqtt_client.subscribe(TOPIC_DATA);
-        mqtt_client.subscribe(TOPIC_PROGRESS);
-    } else {
-        Serial.printf("MQTT connect failed, rc=%d\n", mqtt_client.state());
+static void step_registering() {
+    switch (registration::step()) {
+        case registration::Result::Approved:
+            if (model.device_count > 0) {
+                enter_running();
+            } else {
+                status("No devices assigned", "Assign devices to this screen in the ReMoment admin");
+            }
+            break;
+        case registration::Result::Pending: {
+            String detail = "Approve this screen in ReMoment under Settings > Clients (" + String(model.server_url) + ")";
+            // Older servers have no pairing code: the chip id is what the admin list shows
+            String code = model.pairing_code[0] ? String(model.pairing_code) : gwChipId();
+            status("Waiting for approval", detail.c_str(), code.c_str());
+            break;
+        }
+        case registration::Result::Failed:
+            status("Registering with the server", model.server_ok ? nullptr : "Server not reachable, retrying");
+            break;
     }
 }
 
-// ---------------------------------------------------------------------------
+static void step_running() {
+    player::loop();
+    registration::heartbeat_loop();
+
+    unsigned long now = millis();
+    if (now - last_device_refresh_ms > kDeviceRefreshIntervalMs) {
+        last_device_refresh_ms = now;
+        int before = model.device() ? model.device()->id : -1;
+        if (registration::refresh_devices()) {
+            int after = model.device() ? model.device()->id : -1;
+            if (after != before) player::device_changed();
+        }
+    }
+}
+
+static void update_connection_icon() {
+    static int last = -1;
+    bool wifi   = network_up();
+    bool server = model.phase != Phase::Running || model.server_ok;
+    bool mqtt   = model.phase != Phase::Running || model.mqtt_connected;
+    int state = wifi | server << 1 | mqtt << 2;
+    if (state == last) return;
+    last = state;
+    ui::set_connection(wifi, server, mqtt);
+}
 
 void setup() {
-    // Must run first: also brings up the shared I2C bus and IO expander
-    esp_lcd_touch_handle_t tp_handle = touch_gt911_init();
-
     Serial.begin(115200);
 
-    esp_lcd_panel_handle_t panel_handle = waveshare_esp32_s3_rgb_lcd_init();
-    waveshare_rgb_lcd_bl_on();
+    board::init();
+    ui::init();
 
-    ESP_ERROR_CHECK(lvgl_port_init(panel_handle, tp_handle));
-    if (lvgl_port_lock(-1)) {
-        ui_init();
-        lvgl_port_unlock();
+    model.sd_available = board::sd_mount();
+    Serial.printf("SD card: %s\n", model.sd_available ? "found" : "not found");
+
+    settings::register_groups();
+    if (model.sd_available) {
+        gwSetSd(SD_MMC);
+        gwAddFs("sd", "SD Card", SD_MMC);
     }
 
-    wifi_connect();
+    GwConfig cfg;
+    cfg.name            = DEVICE_NAME;
+    cfg.defaultPassword = WEB_DEFAULT_PASSWORD;
+    cfg.appVersion      = FIRMWARE_VERSION;
+    gwBegin(cfg);
 
-    mqtt_client.setServer(MQTT_HOST, MQTT_PORT);
-    mqtt_client.setCallback(mqtt_callback);
-    mqtt_client.setSocketTimeout(3);
-    mqtt_connect();
-
-    sd_available = (sd_mmc_init() == ESP_OK);
-    Serial.printf("SD card: %s\n", sd_available ? "found" : "not found");
-
-    debug_server.on("/status", handle_debug_status);
-    debug_server.begin();
-    Serial.printf("Debug server: http://%s/status\n", WiFi.localIP().toString().c_str());
+    player::begin();
 }
 
 void loop() {
-    mqtt_connect();
-    mqtt_client.loop();
+    gwLoop();
 
-    if (is_playing && millis() - last_data_ms > NOT_PLAYING_TIMEOUT_MS) {
-        is_playing = false;
-        ui_set_playing(false);
+    if (settings::take_rediscover_request()) restart_flow();
+
+    switch (model.phase) {
+        case Phase::Network:     step_network(); break;
+        case Phase::Discovering: step_discovering(); break;
+        case Phase::Registering: step_registering(); break;
+        case Phase::Running:     step_running(); break;
     }
+    update_connection_icon();
 
-    debug_server.handleClient();
-
-    if (millis() - last_battery_ms > BATTERY_SAMPLE_INTERVAL_MS) {
-        last_battery_ms = millis();
-        sample_battery();
+    if (millis() - last_battery_ms > kBatterySampleIntervalMs) {
+        last_battery_ms       = millis();
+        model.battery_voltage = board::battery_voltage();
     }
 }

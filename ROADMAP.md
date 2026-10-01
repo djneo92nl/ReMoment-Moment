@@ -29,20 +29,22 @@ The plan for turning the "Now Playing" display into a full touch remote for ReMo
 
 Removes everything hard-coded (WiFi, broker IP, `PLAYER_ID`) and lays the groundwork for multiple screens.
 
-- [ ] **[C] garnet_web integration** — captive-portal WiFi setup, settings stored in NVS, replaces `src/config.h`
-  - [ ] Server URL + MQTT broker setting, with automatic discovery as the default
-  - [ ] Debug/status page (replaces the current `GET /status` JSON endpoint on port 80)
-  - [ ] OTA firmware upload — the 16 MB partition table already has two 6.25 MB app slots; firmware is ~1.3 MB once images are off flash
-  - [ ] *Nice to have:* SD file manager (inspect / clear the artwork cache)
+> Client items marked done are **compile-tested only** — verify on hardware: setup portal, mDNS discovery, registration/approval, MQTT, swipe gestures, `board::set_backlight()` (PWM direction is a guess).
+
+- [x] **[C] garnet_web integration** — captive-portal WiFi setup, settings stored in NVS, replaces `src/config.h`
+  - [x] Server URL + MQTT broker setting, with automatic discovery as the default
+  - [x] Debug/status page (replaces the current `GET /status` JSON endpoint on port 80)
+  - [x] OTA firmware upload — the 16 MB partition table already has two 6.25 MB app slots; firmware is ~1.3 MB once images are off flash
+  - [x] *Nice to have:* SD file manager (inspect / clear the artwork cache)
 - [ ] **[S] Server discovery** — advertise the ReMoment API and MQTT broker over mDNS (e.g. `_remoment._tcp`)
-- [ ] **[C] Client registration** — `POST /clients/register` with hardware ID + firmware version, show code + "waiting for approval", poll `/clients/status/{token}`, store `apiToken`, send heartbeat
-- [ ] **[C] Assigned devices** — fetch `GET /clients/{apiToken}/devices`, remember the last used device
-- [ ] **[C] Startup screen** — small logo + connection steps (WiFi → server → MQTT); replaces the 1536×1024 startup image
-- [ ] **[C] Connection status icon** on all screens
-- [ ] **[C] UI in code** — screen manager, swipe navigation, shared styles; port Now Playing out of SquareLine
-- [ ] **[C] Board abstraction** — keep display, touch, backlight, battery, SD and LVGL locking behind one small `board` interface, so a second board is a new implementation rather than `#ifdef`s through the app
-- [ ] **[C] Resolution-independent UI** — layouts from screen size (no hard-coded 1024×600 coordinates), so a portrait 320×480 layout can be added later
-- [ ] **[C] HTTP client layer** — small REST helper for API calls (JSON, timeouts, runs outside the LVGL task)
+- [x] **[C] Client registration** — `POST /clients/register` with hardware ID + firmware version, show code + "waiting for approval", poll `/clients/status/{token}`, store `apiToken`, send heartbeat
+- [x] **[C] Assigned devices** — fetch `GET /clients/{apiToken}/devices`, remember the last used device
+- [x] **[C] Startup screen** — small logo + connection steps (WiFi → server → MQTT); replaces the 1536×1024 startup image
+- [x] **[C] Connection status icon** on all screens
+- [x] **[C] UI in code** — screen manager, swipe navigation, shared styles; port Now Playing out of SquareLine
+- [x] **[C] Board abstraction** — keep display, touch, backlight, battery, SD and LVGL locking behind one small `board` interface, so a second board is a new implementation rather than `#ifdef`s through the app
+- [x] **[C] Resolution-independent UI** — layouts from screen size (no hard-coded 1024×600 coordinates), so a portrait 320×480 layout can be added later
+- [x] **[C] HTTP client layer** — small REST helper for API calls (JSON, timeouts, runs outside the LVGL task)
 
 ## Phase 2 — Artwork on SD
 

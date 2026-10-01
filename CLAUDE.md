@@ -13,7 +13,7 @@ This is **ReMomentClient**, the primary hardware client for ReMoment (`~/Code/Re
 - **Library browsing** — browse the ReMoment media library (artists, albums, playlists) and start playback on a device
 - **Queue and radio** — view the play queue, start radio stations
 
-Currently only the now-playing view exists, hard-wired to device 4 over MQTT. New features should be designed with the full scope in mind (multiple screens, selectable device, REST + MQTT).
+The plan and its order live in `ROADMAP.md`. Currently implemented: WiFi setup and settings via garnet_web, server discovery, client registration, assigned devices, and the now-playing view over MQTT. A second board (3.5" ES3C28P, see `~/Code/MeetMicRec`) is planned, so keep hardware access behind `src/board/` and layouts derived from screen size.
 
 ### Server integration
 
@@ -21,7 +21,7 @@ Currently only the now-playing view exists, hard-wired to device 4 over MQTT. Ne
 - **REST API (pull + commands, client → server)**: defined in `routes/api.php` on the server, docs in `docs/api/`. Key endpoints: `GET /devices`, `POST /devices/{id}/{action}` (transport), `PUT /devices/{id}/volume|mute|seek`, `GET /devices/{id}/queue|sources`, `POST /devices/{id}/library/play|play-playlist`, `POST /devices/{id}/radio/{station}`, multiroom endpoints
 - **Client registration**: `POST /clients/register` → poll `GET /clients/status/{registrationToken}` → use `apiToken` for `GET /clients/{apiToken}/devices` and `PUT /clients/{apiToken}/heartbeat`
 - Always check the server repo (`/Users/remko/Code/ReMomentServer`) for current topic names, payload formats, and endpoint contracts rather than guessing
-- **UI design**: UIs are created in SquareLine Studio, then exported into `src/ui/` — make UI changes in SquareLine Studio first
+- **UI design**: the UI is written by hand in C++ (`src/ui/`); SquareLine Studio is no longer used. Look: black background, simple shapes, in the spirit of the Bang & Olufsen BeoSound Moment — ask for the user's reference images before redesigning a screen
 
 ## Build Commands
 
@@ -48,22 +48,25 @@ There are no automated tests — verification is done by flashing and observing 
 ### Layered Structure
 
 ```
-Application:   src/main.cpp  +  src/ui/  (SquareLine Studio generated)
+Application:   src/main.cpp (boot flow state machine), src/settings.*, src/model.h
+Network:       src/net/  — api (HTTP JSON), server (mDNS discovery + /api/info), registration, player (MQTT)
+UI:            src/ui/   — ui.h is the public API; screens in now_playing.*, layout.h derives metrics from screen size
+Board:         src/board/ — board.h interface, one board_*.cpp per supported board (selected by build flag, e.g. BOARD_WAVESHARE_7B)
 GUI:           lib/lvgl/  (LVGL v8.4, vendored) + lib/lv_conf.h
 HAL:           lib/lvgl_port/  +  lib/rgb_lcd_port/  +  lib/touch/  +  lib/io_extension/  +  lib/i2c/  +  lib/user_sd/
-MCU:           ESP32-S3 via ESP-IDF / Arduino framework (FreeRTOS)
+Settings/web:  garnet_web (lib_deps) — captive-portal WiFi setup, settings in NVS, OTA, SD file manager, status page
+MCU:           ESP32-S3, Arduino-ESP32 3.x (ESP-IDF 5.5, FreeRTOS)
 ```
 
 ### Threading Model
 
-LVGL runs in its own FreeRTOS task on core 1 (configured in `lib/lvgl_port/lvgl_port.h`). LVGL is not thread-safe: any LVGL call from another task (the Arduino `loop()`, MQTT callbacks, etc.) must be wrapped in `lvgl_port_lock(-1)` / `lvgl_port_unlock()`. This includes `lv_async_call()`, which creates an LVGL timer. See the `ui_*` helpers in `main.cpp`.
+- **LVGL task** (core 1, `lib/lvgl_port/`): runs `lv_timer_handler()` and LVGL event callbacks. LVGL is not thread-safe, so every LVGL call from another task must hold the lock (`board::lvgl_lock()` or the `LvglLock` RAII guard). All `ui::` functions take the lock themselves; code inside `src/ui/` called from them (e.g. `ui::now_playing::*`) assumes it is already held. This includes `lv_async_call()`, which creates an LVGL timer.
+- **Arduino loop task**: `gwLoop()`, the boot flow, HTTP calls (blocking, 5 s timeout), MQTT. Owns `model` (`src/model.h`).
+- **garnet_web HTTP task**: serves the web UI. Settings callbacks/buttons are deferred to `gwLoop()` (loop task); only `gsInfo` getters run on the HTTP task, and they must stay read-only.
 
-### Data Flow
+### Boot Flow (main.cpp)
 
-1. MQTT broker publishes JSON to `remoment/player/{PLAYER_ID}/data` and progress to `remoment/player/{PLAYER_ID}/progress`
-2. `mqtt_callback()` in `main.cpp` parses JSON (ArduinoJson) into fixed-size char buffers (`track_artist[64]`, `track_name[64]`)
-3. `ui_show_track()` / `ui_show_progress()` take the LVGL mutex and update labels/sliders
-4. LVGL renders to a PSRAM framebuffer → RGB LCD panel at 1024×600 px, 20 MHz pixel clock
+`Phase::Network` (garnet_web connects WiFi or opens the setup AP) → `Discovering` (server URL from settings, else mDNS `_remoment._tcp`, then `GET /api/info` for the MQTT broker) → `Registering` (register, show pairing code, poll until approved, store `api_token` in NVS namespace `rm_reg`) → `Running` (assigned devices, MQTT subscribe to the current device's `{mqtt_topic}/data|progress`, heartbeat, device refresh). Status screens are only shown before the first `Running`; after that, connection problems show the small icon in the top-left (top layer).
 
 ### Key Hardware Config
 
@@ -72,20 +75,13 @@ LVGL runs in its own FreeRTOS task on core 1 (configured in `lib/lvgl_port/lvgl_
 - LVGL draw buffer in PSRAM, anti-tearing currently disabled (single LCD framebuffer + bounce buffer) — see `lib/lvgl_port/lvgl_port.h` and `lib/rgb_lcd_port/rgb_lcd_port.h`
 - LVGL memory pool: 48 KB; refresh period: 30 ms — see `lib/lv_conf.h`
 
-### UI Files
-
-`src/ui/` is generated by SquareLine Studio — avoid hand-editing generated files. Key widget handles used in `main.cpp`:
-- `ui_track_name`, `ui_Artist` — labels updated from MQTT metadata
-- `uic_playing_progress` — slider driven by MQTT progress (0–100)
-- `ui_album_art` — image object (album art rendering is pending)
-
 ### Configuration
 
-WiFi credentials, MQTT broker and `PLAYER_ID` live in `src/config.h` (gitignored). Copy `src/config.example.h` to create it.
+No credentials in the source. WiFi, server URL (empty = mDNS) and the web password are set in the garnet_web UI at `http://<device>/` (setup AP when no WiFi is known; default web password in `src/app_config.h`). Firmware version and build number also live in `src/app_config.h`.
 
 ### Initialization Order (setup())
 
-1. GT911 touch init (also initializes the shared I2C bus and IO expander, so it must be first) → Serial → RGB LCD init → backlight on
-2. `lvgl_port_init()` with panel + touch handles
-3. Acquire LVGL mutex → `ui_init()` → release mutex
-4. `wifi_connect()` → MQTT configure + connect
+1. `board::init()`: GT911 touch init (also initializes the shared I2C bus and IO expander, so it must be first) → RGB LCD init → backlight on → `lvgl_port_init()`
+2. `ui::init()` (takes the LVGL lock)
+3. SD mount → `settings::register_groups()` → `gwBegin()` (must come after all `gsRegister()` calls)
+4. `player::begin()`; everything else happens in `loop()`
