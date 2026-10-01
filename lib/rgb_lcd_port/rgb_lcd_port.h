@@ -40,8 +40,8 @@
 #define EXAMPLE_LCD_BIT_PER_PIXEL       (16)   ///< Bits per pixel (color depth)
 #define EXAMPLE_RGB_BIT_PER_PIXEL       (16)   ///< RGB interface color depth
 #define EXAMPLE_RGB_DATA_WIDTH          (16)   ///< Data width for RGB interface
-#define EXAMPLE_LCD_RGB_BUFFER_NUMS     (2)    ///< Number of frame buffers for double buffering
-#define EXAMPLE_RGB_BOUNCE_BUFFER_SIZE  (EXAMPLE_LCD_H_RES * 10) ///< Size of bounce buffer for RGB data
+#define EXAMPLE_LCD_RGB_BUFFER_NUMS     (1)    ///< Single framebuffer — no buffer swap timing issues
+#define EXAMPLE_RGB_BOUNCE_BUFFER_SIZE  (EXAMPLE_LCD_H_RES * 10) ///< Bounce buffer protects LCD DMA from WiFi PSRAM contention
 
 /**
  * @brief GPIO Pins for RGB LCD Signals
@@ -92,29 +92,11 @@ esp_lcd_panel_handle_t waveshare_esp32_s3_rgb_lcd_init();
 /**
  * @brief Turn on the LCD backlight.
  */
-void wavesahre_rgb_lcd_bl_on();
+void waveshare_rgb_lcd_bl_on();
 /**
  * @brief Turn off the LCD backlight.
  */
-void wavesahre_rgb_lcd_bl_off();
-
-/**
- * @brief Display a rectangular region of an image on the RGB LCD.
- *
- * @param Xstart Starting X coordinate of the region.
- * @param Ystart Starting Y coordinate of the region.
- * @param Xend Ending X coordinate of the region.
- * @param Yend Ending Y coordinate of the region.
- * @param Image Pointer to the image data buffer.
- */
-void wavesahre_rgb_lcd_display_window(int16_t Xstart, int16_t Ystart, int16_t Xend, int16_t Yend, uint8_t *Image);
-
-/**
- * @brief Display a full-frame image on the RGB LCD.
- *
- * @param Image Pointer to the image data buffer.
- */
-void wavesahre_rgb_lcd_display(uint8_t *Image);
+void waveshare_rgb_lcd_bl_off();
 
 /**
  * @brief Retrieve pointers to the frame buffers for double buffering.

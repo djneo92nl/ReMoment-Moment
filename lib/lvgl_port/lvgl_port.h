@@ -54,7 +54,7 @@
  * Avoid tering related configurations, can be adjusted by users.
  *
  */
-#define LVGL_PORT_AVOID_TEAR_ENABLE     (1) // Set to 1 to enable
+#define LVGL_PORT_AVOID_TEAR_ENABLE     (0) // Disabled: single framebuffer, no buffer swap timing required
 #if LVGL_PORT_AVOID_TEAR_ENABLE
 /**
  * Set the avoid tearing mode:

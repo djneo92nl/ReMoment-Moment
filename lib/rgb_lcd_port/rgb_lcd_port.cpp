@@ -14,7 +14,7 @@
 #include "rgb_lcd_port.h"
 #include "lvgl_port.h"
 
-const char *TAG = "example";
+static const char *TAG = "rgb_lcd";
 
 // Handle for the RGB LCD panel
 static esp_lcd_panel_handle_t panel_handle = NULL; // Declare a handle for the LCD panel
@@ -115,74 +115,6 @@ esp_lcd_panel_handle_t waveshare_esp32_s3_rgb_lcd_init()
     return panel_handle;
 }
 
-/**
- * @brief Display a specific window of an image on the RGB LCD.
- *
- * This function updates a rectangular portion of the RGB LCD screen with the
- * image data provided. The region is defined by the start and end coordinates
- * in both X and Y directions. If the specified coordinates exceed the screen
- * boundaries, they will be clipped accordingly.
- *
- * @param Xstart Starting X coordinate of the display window (inclusive).
- * @param Ystart Starting Y coordinate of the display window (inclusive).
- * @param Xend Ending X coordinate of the display window (exclusive, relative to Xstart).
- * @param Yend Ending Y coordinate of the display window (exclusive, relative to Ystart).
- * @param Image Pointer to the image data buffer, representing the full LCD resolution.
- */
-void wavesahre_rgb_lcd_display_window(int16_t Xstart, int16_t Ystart, int16_t Xend, int16_t Yend, uint8_t *Image)
-{
-    // Ensure Xstart is within valid range, clip Xend to the screen width if necessary
-    if (Xstart < 0) Xstart = 0;
-    else if (Xend > EXAMPLE_LCD_H_RES) Xend = EXAMPLE_LCD_H_RES;
-
-    // Ensure Ystart is within valid range, clip Yend to the screen height if necessary
-    if (Ystart < 0) Ystart = 0;
-    else if (Yend > EXAMPLE_LCD_V_RES) Yend = EXAMPLE_LCD_V_RES;
-
-    // Calculate the width and height of the cropped region
-    int crop_width = Xend - Xstart;
-    int crop_height = Yend - Ystart;
-
-    // Allocate memory for the cropped image data
-    uint8_t *dst_data = (uint8_t *)malloc(crop_width * crop_height * 2); // 2 bytes per pixel
-    if (!dst_data) {
-        printf("Error: Failed to allocate memory for cropped bitmap.\n");
-        return;
-    }
-
-    // Crop the image data (copy each row of the selected region)
-    for (int y = 0; y < crop_height; y++) {
-        // Calculate the source row start in the original image buffer
-        const uint8_t *src_row = Image + ((Ystart + y) * EXAMPLE_LCD_H_RES + Xstart) * 2;
-        // Calculate the destination row start in the cropped buffer
-        uint8_t *dst_row = dst_data + y * crop_width * 2;
-        // Copy the row data
-        memcpy(dst_row, src_row, crop_width * 2);
-    }
-
-    // Draw the cropped region onto the LCD at the specified coordinates
-    // The esp_lcd_panel_draw_bitmap function uses absolute screen coordinates.
-    esp_lcd_panel_draw_bitmap(panel_handle, Xstart, Ystart, Xend, Yend, dst_data);
-
-    // Free the allocated memory for the cropped image buffer
-    free(dst_data);
-}
-
-
-/**
- * @brief Display a full-screen image on the RGB LCD.
- *
- * This function replaces the entire LCD screen content with the image data
- * provided. It assumes the display resolution is 800x480.
- *
- * @param Image Pointer to the image data buffer.
- */
-void wavesahre_rgb_lcd_display(uint8_t *Image)
-{
-    // Draw the entire image on the screen
-    esp_lcd_panel_draw_bitmap(panel_handle, 0, 0, EXAMPLE_LCD_H_RES, EXAMPLE_LCD_V_RES, Image);
-}
-
 void waveshare_get_frame_buffer(void **buf1, void **buf2)
 {
     ESP_ERROR_CHECK(esp_lcd_rgb_panel_get_frame_buffer(panel_handle, 2, buf1, buf2));
@@ -197,7 +129,7 @@ void waveshare_get_frame_buffer(void **buf1, void **buf2)
  * @return
  *    - ESP_OK: Operation successful.
  */
-void wavesahre_rgb_lcd_bl_on()
+void waveshare_rgb_lcd_bl_on()
 {
     IO_EXTENSION_Output(IO_EXTENSION_IO_2, 1);  // Backlight ON configuration
 }
@@ -212,7 +144,7 @@ void wavesahre_rgb_lcd_bl_on()
  * @return
  *    - ESP_OK: Operation successful.
  */
-void wavesahre_rgb_lcd_bl_off()
+void waveshare_rgb_lcd_bl_off()
 {
     IO_EXTENSION_Output(IO_EXTENSION_IO_2, 0);  // Backlight OFF configuration
 }
