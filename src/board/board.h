@@ -24,6 +24,9 @@ void lvgl_unlock();
 // 0 = off, 100 = full brightness
 void set_backlight(uint8_t percent);
 
+// Status LED colour as 0xRRGGBB, 0 = off. No-op on boards without one.
+void set_led(uint32_t rgb);
+
 // Battery voltage in volts, or 0 when the board can't measure it.
 float battery_voltage();
 

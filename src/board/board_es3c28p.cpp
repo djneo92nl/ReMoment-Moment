@@ -29,6 +29,7 @@ static lv_disp_draw_buf_t     draw_buf;
 static lv_disp_drv_t          disp_drv;
 static lv_indev_drv_t         indev_drv;
 static i2c_master_dev_handle_t touch_dev;
+static uint8_t touch_points = 1;  // reported by the controller at init (max simultaneous points)
 
 // ---- Display --------------------------------------------------------------------
 
@@ -60,43 +61,27 @@ static esp_err_t touch_read(uint16_t reg, uint8_t *buf, size_t len) {
     return i2c_master_transmit_receive(touch_dev, addr, sizeof(addr), buf, len, 50);
 }
 
-static esp_err_t touch_write(uint16_t reg, uint8_t value) {
-    uint8_t buf[3] = {(uint8_t)(reg >> 8), (uint8_t)(reg & 0xFF), value};
-    return i2c_master_transmit(touch_dev, buf, sizeof(buf), 50);
-}
-
 static void read_touch(lv_indev_drv_t *, lv_indev_data_t *data) {
     static lv_coord_t last_x = 0, last_y = 0;
     static bool pressed = false;
-    static uint8_t stale_polls = 0;  // polls without a fresh report while pressed
+    static uint8_t frame[7 * 10];
 
-    // Measured on hardware: TP_INT can stay low after the finger lifts, and the last
-    // point stays readable, so trusting either alone gives stuck presses and ghost taps
-    // at the old position. Like the GT911 this controller's status needs clearing after
-    // each read; then "has data" means a fresh report, and a press only lasts while
-    // fresh reports keep coming.
-    bool touched = pressed;
-    if (gpio_get_level((gpio_num_t)ES3C28P_TOUCH_INT) != 0) {
-        touched = false;
-    } else {
+    // TP_INT is low while a report is pending. The whole report frame (7 bytes for every
+    // point the controller supports) must be read, like the vendor driver does: reading only
+    // point 0 left the controller stuck on its first report with TP_INT low, which showed up
+    // as a button that stayed pressed and repeated taps at the old position.
+    bool touched = false;
+    if (gpio_get_level((gpio_num_t)ES3C28P_TOUCH_INT) == 0) {
         uint8_t info = 0;
-        if (touch_read(kRegTouchInfo, &info, 1) == ESP_OK && (info & kInfoHasData)) {
-            uint8_t p[7];
-            bool valid = touch_read(kRegTouchPoint0, p, sizeof(p)) == ESP_OK && (p[0] & kPointValid);
-            touch_write(kRegTouchInfo, 0);  // consume this report
-            if (valid) {
-                last_x = ((p[0] & 0x3F) << 8) | p[1];
-                last_y = ((p[2] & 0x3F) << 8) | p[3];
-            }
-            touched     = valid;
-            stale_polls = 0;
-        } else if (pressed && ++stale_polls >= 3) {  // ~100 ms without a report
-            touched = false;
+        if (touch_read(kRegTouchInfo, &info, 1) == ESP_OK && (info & kInfoHasData) &&
+            touch_read(kRegTouchPoint0, frame, 7 * touch_points) == ESP_OK && (frame[0] & kPointValid)) {
+            last_x  = ((frame[0] & 0x3F) << 8) | frame[1];
+            last_y  = ((frame[2] & 0x3F) << 8) | frame[3];
+            touched = true;
         }
     }
     if (touched != pressed) {
-        pressed     = touched;
-        stale_polls = 0;
+        pressed = touched;
         Serial.printf("[touch] %s %d,%d\n", touched ? "press" : "release", last_x, last_y);
     }
     data->point.x = last_x;
@@ -138,6 +123,7 @@ static void touch_init() {
 
     uint8_t max_touches = 0;
     if (touch_read(kRegMaxTouches, &max_touches, 1) == ESP_OK) {
+        touch_points = max_touches >= 1 && max_touches <= 10 ? max_touches : 1;
         Serial.printf("[board] touch controller ok, %u points\n", max_touches);
     } else {
         Serial.println("[board] touch controller not answering yet");
@@ -211,6 +197,14 @@ bool lvgl_lock(int timeout_ms) {
 void lvgl_unlock() { xSemaphoreGiveRecursive(lvgl_mux); }
 
 void set_backlight(uint8_t percent) { analogWrite(ES3C28P_LCD_BL, min<uint8_t>(percent, 100) * 255 / 100); }
+
+void set_led(uint32_t rgb) {
+    // WS2812s are blinding at full power: a quarter is plenty for an accent glow
+    static uint32_t current = 0xFFFFFFFF;
+    if (rgb == current) return;
+    current = rgb;
+    rgbLedWrite(ES3C28P_RGB_LED, ((rgb >> 16) & 0xFF) / 4, ((rgb >> 8) & 0xFF) / 4, (rgb & 0xFF) / 4);
+}
 
 float battery_voltage() {
     // Divider ratio not yet confirmed on hardware; reads ~0 V without a battery

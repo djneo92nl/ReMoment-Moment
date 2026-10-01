@@ -121,7 +121,7 @@ Board: ES3C28P (ST77922 320×480 QSPI panel, custom-protocol touch at I2C `0x55`
 - [x] **[C] Port touch driver** — custom 0x55 protocol; status register cleared after each read (GT911-style), a press only lasts while fresh reports arrive — `TP_INT` alone gave stuck presses and ghost taps
 - [x] **[C] Portrait layouts** — Now Playing with controls anchored above the progress bar; device list, details and library reuse the responsive layouts
 - [ ] **[S] Artwork sizes per client** — backgrounds at the client's resolution (320×480), reported at registration
-- [ ] **[C] RGB LED status** — play state / connection / album color
+- [x] **[C] RGB LED status** — the album's main safe colour while playing, off otherwise (play state / connection signalling still open)
 - [ ] **[C] Touch/click sounds** through the ES8311 speaker
 - [ ] **[C] Battery** — confirm the divider ratio on real hardware (unverified in MeetMicRec)
 

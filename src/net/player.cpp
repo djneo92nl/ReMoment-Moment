@@ -6,6 +6,7 @@
 #include <garnet_web.h>
 
 #include "artwork/artwork.h"
+#include "board/board.h"
 #include "model.h"
 #include "ui/ui.h"
 
@@ -60,10 +61,20 @@ static PlayState parse_state(const char *s) {
     return PlayState::Unknown;
 }
 
+// Status LED: the current album's main safe colour while something plays
+static void update_led() {
+    const Device *d = model.device();
+    const artwork::Request *art = d ? &device_artwork[model.current_device] : nullptr;
+    board::set_led(d && d->active() && art->has_accent ? art->accent : 0);
+}
+
 // Pushes a device change to the screens that show it
 static void changed(int index, uint8_t what) {
     const Device &d = model.devices[index];
-    if (index == model.current_device) ui::now_playing_update(d, what);
+    if (index == model.current_device) {
+        ui::now_playing_update(d, what);
+        update_led();
+    }
     ui::devices_update(index, d);
 }
 
@@ -187,6 +198,7 @@ void device_changed() {
         artwork::clear();
     }
     ui::devices_sync(model.devices, model.device_count, model.current_device);
+    update_led();
 }
 
 void loop() {
