@@ -114,12 +114,12 @@ Server support per driver (untested on hardware: ASE power-on, Mozart shuffle/re
 
 ## Phase 5 — 3.5" handheld remote
 
-Board: ES3C28P (ST77922 320×480 QSPI panel, custom-protocol touch at I2C `0x55`, ES8311 audio, RGB LED, SDIO SD, battery ADC). Reference drivers and hard-won bring-up notes live in `~/Code/MeetMicRec` (`src/display.c`, `src/touch.c`, `include/board_config.h`, `CLAUDE.md`).
+Board: ES3C28P (ST77922 320×480 QSPI panel, custom-protocol touch at I2C `0x55`, ES8311 audio, RGB LED, SDIO SD, battery ADC). **Running on real hardware** (setup portal, registration, MQTT, artwork, controls verified 2026-10-01). Reference drivers and hard-won bring-up notes live in `~/Code/MeetMicRec` (`src/display.c`, `src/touch.c`, `include/board_config.h`, `CLAUDE.md`).
 
-- [ ] **[C] PlatformIO env + board definition** for the ES3C28P
-- [ ] **[C] Port display driver** — vendor 62-command ST77922 init sequence, 40 MHz QSPI, `LV_COLOR_16_SWAP`, small DMA partial buffer (no full refresh)
-- [ ] **[C] Port touch driver** — custom 0x55 protocol, `TP_INT` as the press/release signal
-- [ ] **[C] Portrait layouts** focused on a handheld remote: now playing, controls, volume, device list; library limited or left out
+- [x] **[C] PlatformIO env + board definition** for the ES3C28P
+- [x] **[C] Port display driver** — vendor 62-command ST77922 init sequence, 40 MHz QSPI, `LV_COLOR_16_SWAP`, small DMA partial buffer (no full refresh)
+- [x] **[C] Port touch driver** — custom 0x55 protocol; status register cleared after each read (GT911-style), a press only lasts while fresh reports arrive — `TP_INT` alone gave stuck presses and ghost taps
+- [x] **[C] Portrait layouts** — Now Playing with controls anchored above the progress bar; device list, details and library reuse the responsive layouts
 - [ ] **[S] Artwork sizes per client** — backgrounds at the client's resolution (320×480), reported at registration
 - [ ] **[C] RGB LED status** — play state / connection / album color
 - [ ] **[C] Touch/click sounds** through the ES8311 speaker

@@ -60,33 +60,43 @@ static esp_err_t touch_read(uint16_t reg, uint8_t *buf, size_t len) {
     return i2c_master_transmit_receive(touch_dev, addr, sizeof(addr), buf, len, 50);
 }
 
+static esp_err_t touch_write(uint16_t reg, uint8_t value) {
+    uint8_t buf[3] = {(uint8_t)(reg >> 8), (uint8_t)(reg & 0xFF), value};
+    return i2c_master_transmit(touch_dev, buf, sizeof(buf), 50);
+}
+
 static void read_touch(lv_indev_drv_t *, lv_indev_data_t *data) {
     static lv_coord_t last_x = 0, last_y = 0;
-    static uint8_t low_reads = 0;   // consecutive polls with TP_INT low
     static bool pressed = false;
-    data->point.x = last_x;
-    data->point.y = last_y;
-    data->state   = LV_INDEV_STATE_REL;
+    static uint8_t stale_polls = 0;  // polls without a fresh report while pressed
 
-    // The controller's "has data" bit sticks after the first touch and the last point stays
-    // readable, so TP_INT (low while touched) decides. A short glitch on TP_INT would read
-    // as a press at the previous position (ghost taps on the last button used), so a press
-    // only counts once TP_INT has been low for two polls in a row.
-    bool low = gpio_get_level((gpio_num_t)ES3C28P_TOUCH_INT) == 0;
-    low_reads = low ? (uint8_t)min(low_reads + 1, 255) : 0;
-
-    bool touched = false;
-    if (low_reads >= 2) {
-        uint8_t info = 0, p[7];
-        if (touch_read(kRegTouchInfo, &info, 1) == ESP_OK && (info & kInfoHasData) &&
-            touch_read(kRegTouchPoint0, p, sizeof(p)) == ESP_OK && (p[0] & kPointValid)) {
-            last_x  = ((p[0] & 0x3F) << 8) | p[1];
-            last_y  = ((p[2] & 0x3F) << 8) | p[3];
-            touched = true;
+    // Measured on hardware: TP_INT can stay low after the finger lifts, and the last
+    // point stays readable, so trusting either alone gives stuck presses and ghost taps
+    // at the old position. Like the GT911 this controller's status needs clearing after
+    // each read; then "has data" means a fresh report, and a press only lasts while
+    // fresh reports keep coming.
+    bool touched = pressed;
+    if (gpio_get_level((gpio_num_t)ES3C28P_TOUCH_INT) != 0) {
+        touched = false;
+    } else {
+        uint8_t info = 0;
+        if (touch_read(kRegTouchInfo, &info, 1) == ESP_OK && (info & kInfoHasData)) {
+            uint8_t p[7];
+            bool valid = touch_read(kRegTouchPoint0, p, sizeof(p)) == ESP_OK && (p[0] & kPointValid);
+            touch_write(kRegTouchInfo, 0);  // consume this report
+            if (valid) {
+                last_x = ((p[0] & 0x3F) << 8) | p[1];
+                last_y = ((p[2] & 0x3F) << 8) | p[3];
+            }
+            touched     = valid;
+            stale_polls = 0;
+        } else if (pressed && ++stale_polls >= 3) {  // ~100 ms without a report
+            touched = false;
         }
     }
     if (touched != pressed) {
-        pressed = touched;
+        pressed     = touched;
+        stale_polls = 0;
         Serial.printf("[touch] %s %d,%d\n", touched ? "press" : "release", last_x, last_y);
     }
     data->point.x = last_x;
