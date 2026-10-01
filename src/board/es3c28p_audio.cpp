@@ -2,6 +2,11 @@
 // es8311_config_sample for MCLK 4.096 MHz / 16 kHz, es8311_start in DAC mode) as register
 // writes, so the whole codec component isn't needed under Arduino. Speaker playback on this
 // board was never tried in MeetMicRec (mic only) — first use here.
+//
+// PARKED (2026-10-01): no sound yet. The codec answers (chip id 8311), every register reads
+// back as written and I2S writes complete, but neither Audio_EN level gives sound from the
+// attached speaker. Next suspects: the codec's analog output path (0x13/0x14 and the
+// 0x0D..0x12 power bits), I2S slot/format (try stereo), or a different amplifier enable pin.
 #if defined(BOARD_ES3C28P)
 
 #include "es3c28p_audio.h"
@@ -27,6 +32,11 @@ static volatile uint8_t volume = 60;
 static bool write_reg(uint8_t reg, uint8_t value) {
     uint8_t buf[2] = {reg, value};
     return i2c_master_transmit(codec, buf, sizeof(buf), 50) == ESP_OK;
+}
+
+static int read_reg(uint8_t reg) {
+    uint8_t value = 0;
+    return i2c_master_transmit_receive(codec, &reg, 1, &value, 1, 50) == ESP_OK ? value : -1;
 }
 
 static bool codec_init() {
@@ -117,6 +127,9 @@ bool init(i2c_master_bus_handle_t bus) {
     pinMode(ES3C28P_AUDIO_EN, OUTPUT);
     digitalWrite(ES3C28P_AUDIO_EN, LOW);  // speaker amplifier on (active low)
 
+    Serial.printf("[audio] regs 00=%02X 01=%02X 09=%02X 0D=%02X 12=%02X 31=%02X 32=%02X, chip id %02X%02X\n", read_reg(0x00),
+                  read_reg(0x01), read_reg(0x09), read_reg(0x0D), read_reg(0x12), read_reg(0x31), read_reg(0x32),
+                  read_reg(0xFD), read_reg(0xFE));
     make_click();
     queue = xQueueCreate(2, 1);
     xTaskCreatePinnedToCore(audio_task, "audio", 3072, nullptr, 3, nullptr, 0);

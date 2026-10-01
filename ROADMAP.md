@@ -120,9 +120,9 @@ Board: ES3C28P (ST77922 320×480 QSPI panel, custom-protocol touch at I2C `0x55`
 - [x] **[C] Port display driver** — vendor 62-command ST77922 init sequence, 40 MHz QSPI, `LV_COLOR_16_SWAP`, small DMA partial buffer (no full refresh)
 - [x] **[C] Port touch driver** — custom 0x55 protocol; status register cleared after each read (GT911-style), a press only lasts while fresh reports arrive — `TP_INT` alone gave stuck presses and ghost taps
 - [x] **[C] Portrait layouts** — Now Playing with controls anchored above the progress bar; device list, details and library reuse the responsive layouts
-- [ ] **[S] Artwork sizes per client** — backgrounds at the client's resolution (320×480), reported at registration
+- [x] **[S] Artwork sizes per client** — `proxy_bg_320x480` next to `proxy_bg`; clients pick `proxy_bg_{w}x{h}`, SD export per size (`artwork:export-sd --size=320x480`)
 - [x] **[C] RGB LED status** — the album's main safe colour while playing, off otherwise (play state / connection signalling still open)
-- [ ] **[C] Touch/click sounds** through the ES8311 speaker
+- [ ] **[C] Touch/click sounds** through the ES8311 speaker — *parked*: code, tick trigger and "Sound" setting are in; codec configures and reads back fine, but no audible output yet (see `src/board/es3c28p_audio.cpp`)
 - [ ] **[C] Battery** — confirm the divider ratio on real hardware (unverified in MeetMicRec)
 
 ## Later
