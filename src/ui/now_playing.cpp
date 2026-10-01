@@ -333,13 +333,24 @@ void build(const Layout &l) {
     lv_obj_set_width(artist_label, lv_pct(100));
     lv_label_set_long_mode(artist_label, LV_LABEL_LONG_DOT);
 
-    transport_row = row(info, l.margin);
-    lv_obj_set_style_pad_top(transport_row, l.margin, 0);
+    // Landscape: controls follow the text. Portrait: anchored above the progress bar, so a
+    // long title can't push them into it.
+    lv_obj_t *controls = info;
+    if (!l.landscape) {
+        controls = widgets::box(scr);
+        lv_obj_set_size(controls, l.width - 2 * l.margin, LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(controls, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(controls, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_align(controls, LV_ALIGN_BOTTOM_MID, 0, -(l.margin + 10 + l.gap));
+    }
+
+    transport_row = row(controls, l.margin);
+    if (l.landscape) lv_obj_set_style_pad_top(transport_row, l.margin, 0);
     widgets::round_button(transport_row, LV_SYMBOL_PREV, l.btn, l.font_body, on_previous);
     play_btn = widgets::round_button(transport_row, LV_SYMBOL_PLAY, l.btn_large, l.font_title, on_play);
     widgets::round_button(transport_row, LV_SYMBOL_NEXT, l.btn, l.font_body, on_next);
 
-    modes_row = row(info, l.gap);
+    modes_row = row(controls, l.gap);
     lv_obj_set_style_pad_top(modes_row, l.gap, 0);
     shuffle_btn = widgets::round_button(modes_row, LV_SYMBOL_SHUFFLE, l.btn_small, l.font_small, on_shuffle);
     repeat_btn  = widgets::round_button(modes_row, LV_SYMBOL_LOOP, l.btn_small, l.font_small, on_repeat);
@@ -354,7 +365,8 @@ void build(const Layout &l) {
         lv_obj_align(cover_box, LV_ALIGN_TOP_MID, 0, l.margin);
         lv_obj_set_width(info, l.width - 2 * l.margin);
         lv_obj_set_flex_align(info, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_align_to(info, cover_box, LV_ALIGN_OUT_BOTTOM_MID, 0, l.margin);
+        lv_obj_align_to(info, cover_box, LV_ALIGN_OUT_BOTTOM_MID, 0, l.gap);
+        lv_label_set_long_mode(track_label, LV_LABEL_LONG_SCROLL_CIRCULAR);  // one line in portrait
         lv_obj_set_style_text_align(track_label, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_style_text_align(artist_label, LV_TEXT_ALIGN_CENTER, 0);
     }
