@@ -64,6 +64,7 @@ Moves all images off flash (~4.7 MB) and downloads them as needed.
 - [ ] **[C/S] Pre-cache library covers** in the background while idle — server lists artwork most-recently-played first (`GET /api/clients/{token}/artwork`), client downloads missing covers and backgrounds
 - [ ] **[S] SD card export** — admin download / artisan command: zip of the last N albums in the exact SD layout (`remoment/covers/{hash}.jpg`, `remoment/backgrounds/{hash}.jpg`) to unzip onto the card
 - [x] **[C] No-SD warning** and artwork placeholders
+- [ ] **[S] Placeholder in `/api/info`** — the generic music logo as a full artwork object; the client shows `placeholder.proxy_320` whenever there's no cover (client side done)
 - [x] **[C] Remove the built-in images** from `src/ui/`
 
 ## Phase 3 — Playback control and devices

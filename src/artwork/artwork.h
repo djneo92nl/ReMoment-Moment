@@ -7,7 +7,7 @@
 namespace artwork {
 
 struct Request {
-    char     cover_url[192];   // artwork.proxy_320, "" = none
+    char     cover_url[192];   // artwork.proxy_320, "" = placeholder
     char     background_url[192];  // artwork.proxy_bg, "" = none
     bool     has_accent;
     uint32_t accent;           // 0xRRGGBB from artwork.safe_colors[0]

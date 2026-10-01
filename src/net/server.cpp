@@ -45,6 +45,7 @@ bool discover() {
     strlcpy(model.mqtt_host, *mqtt_host ? mqtt_host : host_of(url).c_str(), sizeof(model.mqtt_host));
     model.mqtt_port = info["mqtt"]["port"] | 1883;
     strlcpy(model.artwork_base_url, info["artwork_base_url"] | url.c_str(), sizeof(model.artwork_base_url));
+    strlcpy(model.placeholder_url, info["placeholder"]["proxy_320"] | "", sizeof(model.placeholder_url));
 
     Serial.printf("[server] %s, MQTT %s:%u\n", model.server_url, model.mqtt_host, model.mqtt_port);
     return true;

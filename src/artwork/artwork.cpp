@@ -6,6 +6,7 @@
 #include <lvgl.h>
 
 #include "cache.h"
+#include "model.h"
 #include "ui/ui.h"
 
 namespace artwork {
@@ -118,6 +119,9 @@ static void task(void *) {
     for (;;) {
         if (xQueueReceive(queue, &req, portMAX_DELAY) != pdTRUE) continue;
         if (!cache_ok) req.cover_url[0] = req.background_url[0] = '\0';
+
+        // No cover (or still being processed on the server): show the server's placeholder logo
+        if (cache_ok && !req.cover_url[0]) strlcpy(req.cover_url, model.placeholder_url, sizeof(req.cover_url));
 
         bool cover_changed, background_changed;
         const lv_img_dsc_t *cover      = load(covers, cache::Kind::Cover, req.cover_url, cover_changed);
