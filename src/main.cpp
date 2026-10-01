@@ -62,6 +62,13 @@ static void restart_flow() {
     player::device_changed();
 }
 
+// garnet_web keeps only a salted hash once the password is changed, so the actual
+// password can only be shown while it's still the firmware default
+static String web_password_hint() {
+    if (gsNamespaceExists("gw_auth")) return "Settings password: the one you set";
+    return String("Settings password: ") + WEB_DEFAULT_PASSWORD;
+}
+
 static void step_network() {
     if (network_up()) {
         model.phase = Phase::Discovering;
@@ -69,6 +76,8 @@ static void step_network() {
     }
     if (gwPortalActive()) {
         String detail = "Then open http://" + gwNetIP().toString() + " to choose your network";
+        // Someone joined the setup network: they'll need the password next
+        if (WiFi.softAPgetStationNum() > 0) detail += "\n" + web_password_hint();
         String message = "Connect to WiFi \"" + WiFi.softAPSSID() + "\"";
         status(message.c_str(), detail.c_str());
     } else {
@@ -78,7 +87,10 @@ static void step_network() {
 
 static void step_discovering() {
     String url = settings::server_url();
-    status("Looking for the ReMoment server", url.isEmpty() ? "Searching the network" : url.c_str());
+    // Without mDNS the server URL has to be entered in the settings page: say where and how
+    String detail = url.isEmpty() ? String("Searching the network") : url;
+    detail += "\nSettings: http://" + gwNetIP().toString() + "  \xC2\xB7  " + web_password_hint();
+    status("Looking for the ReMoment server", detail.c_str());
 
     unsigned long now = millis();
     if (last_discover_ms != 0 && now - last_discover_ms < kDiscoverIntervalMs) return;
