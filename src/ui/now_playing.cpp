@@ -119,10 +119,15 @@ static void set_visible(lv_obj_t *obj, bool visible) {
 static void show_capabilities() {
     bool media = (shown.caps & kCapMediaControls) != 0;
     set_visible(transport_row, media);
-    set_visible(shuffle_btn, shown.caps & kCapShuffle);
-    set_visible(repeat_btn, shown.caps & kCapRepeat);
-    set_visible(like_btn, shown.caps & kCapLike);
-    set_visible(modes_row, shown.caps & (kCapShuffle | kCapRepeat | kCapLike));
+    // A known mode value also counts as support: capabilities only refresh every few
+    // minutes, while e.g. Spotify routing to this speaker brings its modes along at once
+    bool shuffle = (shown.caps & kCapShuffle) || shown.shuffle >= 0;
+    bool repeat  = (shown.caps & kCapRepeat) || shown.repeat != Repeat::Unknown;
+    bool like    = (shown.caps & kCapLike) || shown.liked >= 0;
+    set_visible(shuffle_btn, shuffle);
+    set_visible(repeat_btn, repeat);
+    set_visible(like_btn, like);
+    set_visible(modes_row, shuffle || repeat || like);
 }
 
 // ---- Volume overlay ---------------------------------------------------------------
@@ -421,6 +426,7 @@ void update(const Device &d, uint8_t what) {
         shown.repeat  = d.repeat;
         shown.liked   = d.liked;
         show_modes();
+        show_capabilities();
     }
 }
 
