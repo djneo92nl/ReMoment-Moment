@@ -7,7 +7,6 @@
 #include <Arduino.h>
 #include <SD_MMC.h>
 #include <WiFi.h>
-#include <esp_mac.h>
 #include <garnet_web.h>
 
 #include "app_config.h"
@@ -80,46 +79,6 @@ static void log_network() {
     static const char *kModes[] = {"offline", "ethernet", "wifi", "portal"};
     Serial.printf("[net] %s, setup AP %s%s%s, IP %s\n", mode < 4 ? kModes[mode] : "?", portal ? "on \"" : "off",
                   portal ? WiFi.softAPSSID().c_str() : "", portal ? "\"" : "", gwNetIP().toString().c_str());
-}
-
-// garnet_web (v0.1.0) doesn't check WiFi.softAP(): when the portal opens right after a failed
-// attempt at a saved network, the call can fail and no setup network is broadcast while the
-// portal counts as open. Seen on the ES3C28P away from home. Restart the AP ourselves.
-static void ensure_setup_ap() {
-    static unsigned long last_try_ms = 0, last_log_ms = 0;
-    bool portal = gwPortalActive();
-
-    // While the setup network is open without an uplink, the station side must not keep
-    // retrying the saved network on its own: each attempt scans every channel and drags the
-    // AP along, so phones see it but can't finish joining. garnet_web still retries saved
-    // networks itself every 2 minutes when nobody is on the AP.
-    bool quiet = portal && !network_up();
-    if (quiet && WiFi.getAutoReconnect()) {
-        WiFi.setAutoReconnect(false);
-        WiFi.disconnect(false);
-        Serial.println("[net] setup AP open: station auto-reconnect off");
-    } else if (!quiet && !WiFi.getAutoReconnect()) {
-        WiFi.setAutoReconnect(true);
-    }
-
-    if (portal && millis() - last_log_ms > 10000) {
-        last_log_ms = millis();
-        Serial.printf("[net] setup AP \"%s\" ch %d, %d connected, station status %d\n", WiFi.softAPSSID().c_str(),
-                      WiFi.channel(), WiFi.softAPgetStationNum(), (int)WiFi.status());
-    }
-
-    if (!portal || WiFi.softAPSSID().length() > 0) return;
-    if (last_try_ms != 0 && millis() - last_try_ms < 5000) return;
-    last_try_ms = millis();
-
-    uint8_t mac[6] = {};
-    esp_read_mac(mac, ESP_MAC_BASE);
-    char ssid[32];
-    snprintf(ssid, sizeof(ssid), "%s-%02X%02X", DEVICE_NAME, mac[4], mac[5]);  // garnet_web's AP name
-    WiFi.disconnect(false);  // stop the background join attempt that blocks the AP
-    WiFi.mode(WIFI_AP_STA);
-    bool ok = WiFi.softAP(ssid);
-    Serial.printf("[net] setup AP was not up; restarting \"%s\": %s\n", ssid, ok ? "ok" : "failed");
 }
 
 static void step_network() {
@@ -229,7 +188,6 @@ void setup() {
 
 void loop() {
     gwLoop();
-    ensure_setup_ap();
     log_network();
 
     if (settings::take_rediscover_request()) restart_flow();
