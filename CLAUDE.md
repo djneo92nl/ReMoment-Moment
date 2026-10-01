@@ -48,7 +48,7 @@ There are no automated tests — verification is done by flashing and observing 
 ### Layered Structure
 
 ```
-Application:   src/main.cpp (boot flow state machine), src/settings.*, src/model.h
+Application:   src/main.cpp (boot flow state machine), src/app_settings.* (named so it cannot collide with IDF's settings.h), src/model.h
 Network:       src/net/  — api (HTTP JSON), server (mDNS discovery + /api/info), registration, player (MQTT, all assigned devices), commands (UI actions -> REST)
 Artwork:       src/artwork/ — own FreeRTOS task (core 0), priorities: now-playing art > library thumbnails (/remoment/thumbs/) > idle pre-cache; SD cache (/remoment/covers/{hash}.jpg, /remoment/backgrounds/{hash}.jpg, last-use index in PSRAM, saved to /remoment/.lru/*.idx when idle — small SD writes cost ~0.8 s each) + JPEGDEC decode into double-buffered PSRAM images
 UI:            src/ui/   — ui.h is the public API; screens: now_playing.* (+ volume overlay), devices.* (list + details), library.* (one screen, content rebuilt per view, back stack); nav.h switches screens; widgets.* shared look; layout.h derives metrics from screen size
@@ -72,7 +72,7 @@ MCU:           ESP32-S3, Arduino-ESP32 3.x (ESP-IDF 5.5, FreeRTOS)
 
 ### Key Hardware Config
 
-- Display: 1024×600, RGB565 (16-bit), 20 MHz pixel clock — see `lib/rgb_lcd_port/rgb_lcd_port.h`
+- Display: 1024×600, RGB565 (16-bit), 30 MHz pixel clock (≈33 Hz; 20 MHz ≈ 22 Hz visibly flickers) — see `lib/rgb_lcd_port/rgb_lcd_port.h`. Glitch-free only with the `custom_sdkconfig` in `platformio.ini` (RGB/GDMA ISR IRAM-safe, PSRAM XIP, 64 KB / 64 B data cache); pioarduino recompiles the **shared** framework install for it, so both envs share the same settings
 - Touch: GT911 capacitive controller over I2C, INT on GPIO 4 — see `lib/touch/gt911.h`
 - LVGL draw buffer in PSRAM, anti-tearing currently disabled (single LCD framebuffer + bounce buffer) — see `lib/lvgl_port/lvgl_port.h` and `lib/rgb_lcd_port/rgb_lcd_port.h`
 - LVGL memory pool: 48 KB; refresh period: 30 ms — see `lib/lv_conf.h`

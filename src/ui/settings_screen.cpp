@@ -3,7 +3,7 @@
 #include "board/board.h"
 #include "nav.h"
 #include "net/commands.h"
-#include "settings.h"
+#include "app_settings.h"
 #include "widgets.h"
 
 namespace ui::settings_screen {

@@ -6,7 +6,7 @@
 #include "app_config.h"
 #include "board/board.h"
 #include "model.h"
-#include "settings.h"
+#include "app_settings.h"
 
 namespace registration {
 

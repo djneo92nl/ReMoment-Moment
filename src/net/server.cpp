@@ -5,7 +5,7 @@
 #include "api.h"
 #include "app_config.h"
 #include "model.h"
-#include "settings.h"
+#include "app_settings.h"
 
 namespace server {
 

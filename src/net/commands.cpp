@@ -11,7 +11,7 @@
 #include "board/board.h"
 #include "model.h"
 #include "player.h"
-#include "settings.h"
+#include "app_settings.h"
 #include "ui/ui.h"
 
 namespace commands {

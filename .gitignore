@@ -8,3 +8,9 @@
 
 # Local credentials (see src/config.example.h)
 src/config.h
+
+# pioarduino hybrid compile (custom_sdkconfig) artifacts
+managed_components/
+.dummy/
+sdkconfig.*
+sdkconfig.defaults

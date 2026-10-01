@@ -17,7 +17,7 @@
 #include "net/player.h"
 #include "net/registration.h"
 #include "net/server.h"
-#include "settings.h"
+#include "app_settings.h"
 #include "ui/ui.h"
 
 Model model;

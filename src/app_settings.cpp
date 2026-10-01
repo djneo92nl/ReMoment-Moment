@@ -1,4 +1,4 @@
-#include "settings.h"
+#include "app_settings.h"
 
 #include <Preferences.h>
 #include <garnet_settings.h>
