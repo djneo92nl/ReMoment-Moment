@@ -111,14 +111,16 @@ static const lv_img_dsc_t *load(Kind &kind, cache::Kind cache_kind, const char *
     }
     unsigned long start = millis();
     String path = cache::fetch(cache_kind, url);
+    unsigned long fetched = millis();
     if (path.isEmpty() || !decode(path, slot)) {
+        if (!path.isEmpty()) cache::forget(cache_kind, path);  // corrupt file: download again next time
         Serial.printf("[artwork] %s failed: %s\n", what, path.isEmpty() ? url : path.c_str());
         kind.shown  = -1;
         kind.url[0] = '\0';  // retry on the next request
         return nullptr;
     }
-    Serial.printf("[artwork] %s %dx%d in %lu ms (%s)\n", what, slot.dsc.header.w, slot.dsc.header.h, millis() - start,
-                  path.c_str());
+    Serial.printf("[artwork] %s %dx%d: fetch %lu ms, decode %lu ms (%s)\n", what, slot.dsc.header.w,
+                  slot.dsc.header.h, fetched - start, millis() - fetched, path.c_str());
     kind.shown = next;
     return &slot.dsc;
 }
@@ -261,6 +263,7 @@ static void task(void *) {
         }
         if (cache_ok && process_thumb()) continue;
         if (cache_ok && precache_page()) continue;
+        if (cache_ok) cache::save_if_idle();
         // Sleep until request()/thumb_request() wakes us, or check the idle timer again
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(kIdleBeforePrecacheMs));
     }

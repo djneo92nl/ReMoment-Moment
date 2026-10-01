@@ -50,7 +50,7 @@ There are no automated tests — verification is done by flashing and observing 
 ```
 Application:   src/main.cpp (boot flow state machine), src/settings.*, src/model.h
 Network:       src/net/  — api (HTTP JSON), server (mDNS discovery + /api/info), registration, player (MQTT, all assigned devices), commands (UI actions -> REST)
-Artwork:       src/artwork/ — own FreeRTOS task (core 0), priorities: now-playing art > library thumbnails (/remoment/thumbs/) > idle pre-cache; SD cache (/remoment/covers/{hash}.jpg, /remoment/backgrounds/{hash}.jpg, LRU counters in /remoment/.lru/) + JPEGDEC decode into double-buffered PSRAM images
+Artwork:       src/artwork/ — own FreeRTOS task (core 0), priorities: now-playing art > library thumbnails (/remoment/thumbs/) > idle pre-cache; SD cache (/remoment/covers/{hash}.jpg, /remoment/backgrounds/{hash}.jpg, last-use index in PSRAM, saved to /remoment/.lru/*.idx when idle — small SD writes cost ~0.8 s each) + JPEGDEC decode into double-buffered PSRAM images
 UI:            src/ui/   — ui.h is the public API; screens: now_playing.* (+ volume overlay), devices.* (list + details), library.* (one screen, content rebuilt per view, back stack); nav.h switches screens; widgets.* shared look; layout.h derives metrics from screen size
 Board:         src/board/ — board.h interface, one board_*.cpp per supported board (selected by build flag, e.g. BOARD_WAVESHARE_7B)
 GUI:           lib/lvgl/  (LVGL v8.4, vendored) + lib/lv_conf.h
