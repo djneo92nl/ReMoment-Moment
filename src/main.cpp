@@ -10,6 +10,7 @@
 #include <garnet_web.h>
 
 #include "app_config.h"
+#include "artwork/artwork.h"
 #include "board/board.h"
 #include "model.h"
 #include "net/player.h"
@@ -151,6 +152,7 @@ void setup() {
     cfg.appVersion      = FIRMWARE_VERSION;
     gwBegin(cfg);
 
+    artwork::begin(model.sd_available);
     player::begin();
 }
 

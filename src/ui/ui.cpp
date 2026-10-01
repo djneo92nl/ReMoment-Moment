@@ -109,6 +109,25 @@ void now_playing_set_playing(bool playing) {
     if (lock) now_playing::set_playing(playing);
 }
 
+void now_playing_set_notice(const char *text) {
+    LvglLock lock;
+    if (lock) now_playing::set_notice(text);
+}
+
+void artwork_show(const lv_img_dsc_t *cover, bool cover_changed, const lv_img_dsc_t *background,
+                  bool background_changed, bool has_accent, uint32_t accent) {
+    LvglLock lock;
+    if (!lock) return;
+    if (cover_changed) now_playing::set_cover(cover);
+    if (background_changed) now_playing::set_background(background);
+    now_playing::set_accent(has_accent ? lv_color_hex(accent) : color::accent());
+}
+
+void artwork_release(const lv_img_dsc_t *image) {
+    LvglLock lock;
+    if (lock) now_playing::release_image(image);
+}
+
 // ---------------------------------------------------------------------------------
 
 void init() {

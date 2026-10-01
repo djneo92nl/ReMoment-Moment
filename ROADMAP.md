@@ -51,16 +51,18 @@ Removes everything hard-coded (WiFi, broker IP, `PLAYER_ID`) and lays the ground
 
 Moves all images off flash (~4.7 MB) and downloads them as needed.
 
-- [ ] **[C] SD artwork cache** — download `artwork.proxy_320` from the `/data` payload, store it on SD keyed by the server's hash, evict the oldest when full
-- [ ] **[C] JPEG decoding** — LVGL's JPEG decoder into PSRAM; decode outside the LVGL task where possible
+> Client items marked done are **compile-tested only** — verify on hardware: download + SD cache, decode speed, cross-fade smoothness (full-screen background fade is software-blended), eviction.
+
+- [x] **[C] SD artwork cache** — download `artwork.proxy_320` from the `/data` payload, store it on SD keyed by the server's hash, evict the oldest when full
+- [x] **[C] JPEG decoding** — JPEGDEC (bitbank2) into PSRAM, in a dedicated artwork task
 - [x] **[S] Background rendering** — extend `ProcessArtwork` with a 1024×600 background JPEG per album and add it to the `artwork` payload (`proxy_bg`, blurred and darkened cover)
 - [x] **[S] Decoder-friendly JPEGs** — baseline (not progressive) JPEGs for all client sizes
-- [ ] **[C] UI tint from album colors** — progress bar, buttons and accents from `safe_colors`
-- [ ] **[C] Cross-fade** between old and new cover/background on track change
+- [x] **[C] UI tint from album colors** — progress bar, buttons and accents from `safe_colors`
+- [x] **[C] Cross-fade** between old and new cover/background on track change
 - [ ] **[C/S] Radio and source logos** when there's no album art (server provides logo URLs)
 - [ ] **[C/S] Pre-cache library covers** in the background while idle (server endpoint lists artwork URLs for this client's library)
-- [ ] **[C] No-SD warning** and artwork placeholders
-- [ ] **[C] Remove the built-in images** from `src/ui/`
+- [x] **[C] No-SD warning** and artwork placeholders
+- [x] **[C] Remove the built-in images** from `src/ui/`
 
 ## Phase 3 — Playback control and devices
 

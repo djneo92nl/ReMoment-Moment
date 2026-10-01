@@ -5,6 +5,7 @@
 #include <WiFi.h>
 #include <garnet_web.h>
 
+#include "artwork/artwork.h"
 #include "model.h"
 #include "ui/ui.h"
 
@@ -29,6 +30,22 @@ static void mark_data_received() {
     }
 }
 
+// "#rrggbb" -> 0xRRGGBB
+static bool parse_hex_color(const char *s, uint32_t &out) {
+    if (!s || s[0] != '#' || strlen(s) != 7) return false;
+    char *end;
+    out = strtoul(s + 1, &end, 16);
+    return *end == '\0';
+}
+
+static void request_artwork(JsonObjectConst art) {
+    artwork::Request req = {};
+    strlcpy(req.cover_url, art["proxy_320"] | "", sizeof(req.cover_url));
+    strlcpy(req.background_url, art["proxy_bg"] | "", sizeof(req.background_url));
+    req.has_accent = parse_hex_color(art["safe_colors"][0] | "", req.accent);
+    artwork::request(req);
+}
+
 static void on_message(char *topic, byte *payload, unsigned int length) {
     if (strcmp(topic, topic_data) == 0) {
         JsonDocument doc;
@@ -36,6 +53,8 @@ static void on_message(char *topic, byte *payload, unsigned int length) {
         strlcpy(model.track_artist, doc["artist"] | "", sizeof(model.track_artist));
         strlcpy(model.track_name, doc["track"] | "", sizeof(model.track_name));
         ui::now_playing_set_track(model.track_artist, model.track_name);
+        // No artwork object yet on the first play of a new cover (the server processes it async)
+        request_artwork(doc["artwork"]);
         mark_data_received();
     } else if (strcmp(topic, topic_progress) == 0) {
         // Plain numeric payload, 0-100
@@ -99,6 +118,7 @@ void device_changed() {
     const Device *d = model.device();
     ui::now_playing_set_device(d ? d->name : "");
     ui::now_playing_set_playing(false);
+    artwork::clear();
     subscribe();
 }
 
