@@ -34,9 +34,12 @@ void set_backlight(uint8_t percent) {
         return;
     }
     waveshare_rgb_lcd_bl_on();
-    // Untested on hardware: the vendor driver caps duty at 97 "to prevent the screen
-    // from completely turning off", which suggests higher duty = dimmer.
-    IO_EXTENSION_Pwm_Output(100 - min<uint8_t>(percent, 100));
+    // Full brightness without the expander's PWM: its low PWM frequency is visible as
+    // flicker (seen on hardware once brightness control went through it).
+    if (percent >= 100) return;
+    // The vendor driver caps duty at 97 "to prevent the screen from completely turning
+    // off", which suggests higher duty = dimmer. Still unverified on hardware.
+    IO_EXTENSION_Pwm_Output(100 - percent);
 }
 
 void set_led(uint32_t) {}  // no status LED on this board
