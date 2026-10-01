@@ -49,9 +49,9 @@ There are no automated tests — verification is done by flashing and observing 
 
 ```
 Application:   src/main.cpp (boot flow state machine), src/settings.*, src/model.h
-Network:       src/net/  — api (HTTP JSON), server (mDNS discovery + /api/info), registration, player (MQTT)
+Network:       src/net/  — api (HTTP JSON), server (mDNS discovery + /api/info), registration, player (MQTT, all assigned devices), commands (UI actions -> REST)
 Artwork:       src/artwork/ — own FreeRTOS task (core 0): SD cache (/remoment/covers/{hash}.jpg, /remoment/backgrounds/{hash}.jpg, LRU counters in /remoment/.lru/) + JPEGDEC decode into double-buffered PSRAM images
-UI:            src/ui/   — ui.h is the public API; screens in now_playing.*, layout.h derives metrics from screen size
+UI:            src/ui/   — ui.h is the public API; screens: now_playing.* (+ volume overlay), devices.* (list + details); nav.h switches screens; widgets.* shared look; layout.h derives metrics from screen size
 Board:         src/board/ — board.h interface, one board_*.cpp per supported board (selected by build flag, e.g. BOARD_WAVESHARE_7B)
 GUI:           lib/lvgl/  (LVGL v8.4, vendored) + lib/lv_conf.h
 HAL:           lib/lvgl_port/  +  lib/rgb_lcd_port/  +  lib/touch/  +  lib/io_extension/  +  lib/i2c/  +  lib/user_sd/
@@ -62,13 +62,13 @@ MCU:           ESP32-S3, Arduino-ESP32 3.x (ESP-IDF 5.5, FreeRTOS)
 ### Threading Model
 
 - **LVGL task** (core 1, `lib/lvgl_port/`): runs `lv_timer_handler()` and LVGL event callbacks. LVGL is not thread-safe, so every LVGL call from another task must hold the lock (`board::lvgl_lock()` or the `LvglLock` RAII guard). All `ui::` functions take the lock themselves; code inside `src/ui/` called from them (e.g. `ui::now_playing::*`) assumes it is already held. This includes `lv_async_call()`, which creates an LVGL timer.
-- **Arduino loop task**: `gwLoop()`, the boot flow, HTTP calls (blocking, 5 s timeout), MQTT. Owns `model` (`src/model.h`).
+- **Arduino loop task**: `gwLoop()`, the boot flow, HTTP calls (blocking, 5 s timeout), MQTT. Owns `model` (`src/model.h`). UI event callbacks never do HTTP or write the model: they call `commands::post()` (FreeRTOS queue; volume is coalesced) and update the screen optimistically; `commands::loop()` sends the request on the loop task, and MQTT confirms or corrects the state.
 - **Artwork task** (core 0, `src/artwork/artwork.cpp`): downloads, caches and decodes covers/backgrounds; latest request wins (queue of 1). Each kind has two PSRAM slots; it calls `ui::artwork_release()` before overwriting a slot so the UI never references pixels being rewritten, then `ui::artwork_show()` to cross-fade.
 - **garnet_web HTTP task**: serves the web UI. Settings callbacks/buttons are deferred to `gwLoop()` (loop task); only `gsInfo` getters run on the HTTP task, and they must stay read-only.
 
 ### Boot Flow (main.cpp)
 
-`Phase::Network` (garnet_web connects WiFi or opens the setup AP) → `Discovering` (server URL from settings, else mDNS `_remoment._tcp`, then `GET /api/info` for the MQTT broker) → `Registering` (register, show pairing code, poll until approved, store `api_token` in NVS namespace `rm_reg`) → `Running` (assigned devices, MQTT subscribe to the current device's `{mqtt_topic}/data|progress`, heartbeat, device refresh). Status screens are only shown before the first `Running`; after that, connection problems show the small icon in the top-left (top layer).
+`Phase::Network` (garnet_web connects WiFi or opens the setup AP) → `Discovering` (server URL from settings, else mDNS `_remoment._tcp`, then `GET /api/info` for the MQTT broker) → `Registering` (register, show pairing code, poll until approved, store `api_token` in NVS namespace `rm_reg`) → `Running` (assigned devices, MQTT subscribe to `{mqtt_topic}/#` of every assigned device so the device list shows live state, heartbeat, device refresh). Status screens are only shown before the first `Running`; after that, connection problems show the small icon in the top-left (top layer).
 
 ### Key Hardware Config
 

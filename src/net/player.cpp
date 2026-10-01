@@ -18,17 +18,13 @@ static WiFiClient   wifi_client;
 static PubSubClient mqtt(wifi_client);
 
 static unsigned long last_attempt_ms = 0;
-static char subscribed_topic[sizeof(Device::mqtt_topic)] = "";
-static char topic_data[64];
-static char topic_progress[64];
 
-static void mark_data_received() {
-    model.last_data_ms = millis();
-    if (!model.is_playing) {
-        model.is_playing = true;
-        ui::now_playing_set_playing(true);
-    }
-}
+// Subscribed topic filter per device ("remoment/player/4/#"), to unsubscribe after a list change
+static char subscribed[kMaxDevices][sizeof(Device::mqtt_topic) + 2];
+static uint8_t subscribed_count = 0;
+
+// Latest artwork per device, so switching devices shows the right cover at once
+static artwork::Request device_artwork[kMaxDevices];
 
 // "#rrggbb" -> 0xRRGGBB
 static bool parse_hex_color(const char *s, uint32_t &out) {
@@ -38,52 +34,120 @@ static bool parse_hex_color(const char *s, uint32_t &out) {
     return *end == '\0';
 }
 
-static void request_artwork(JsonObjectConst art) {
-    artwork::Request req = {};
+static void parse_artwork(JsonObjectConst art, artwork::Request &req) {
+    req = {};
     strlcpy(req.cover_url, art["proxy_320"] | "", sizeof(req.cover_url));
     strlcpy(req.background_url, art["proxy_bg"] | "", sizeof(req.background_url));
     req.has_accent = parse_hex_color(art["safe_colors"][0] | "", req.accent);
-    artwork::request(req);
+}
+
+static int8_t parse_tristate(JsonVariantConst v) { return v.isNull() ? -1 : (v.as<bool>() ? 1 : 0); }
+
+static Repeat parse_repeat(const char *s) {
+    if (!s) return Repeat::Unknown;
+    if (strcmp(s, "off") == 0) return Repeat::Off;
+    if (strcmp(s, "all") == 0) return Repeat::All;
+    if (strcmp(s, "one") == 0) return Repeat::One;
+    return Repeat::Unknown;
+}
+
+static PlayState parse_state(const char *s) {
+    if (!s) return PlayState::Unknown;
+    if (strcmp(s, "playing") == 0) return PlayState::Playing;
+    if (strcmp(s, "paused") == 0) return PlayState::Paused;
+    if (strcmp(s, "standby") == 0) return PlayState::Standby;
+    if (strcmp(s, "unreachable") == 0) return PlayState::Unreachable;
+    return PlayState::Unknown;
+}
+
+// Pushes a device change to the screens that show it
+static void changed(int index, uint8_t what) {
+    const Device &d = model.devices[index];
+    if (index == model.current_device) ui::now_playing_update(d, what);
+    ui::devices_update(index, d);
+}
+
+static void clear_track(Device &d) {
+    d.track[0] = d.artist[0] = '\0';
+    d.progress = 0;
 }
 
 static void on_message(char *topic, byte *payload, unsigned int length) {
-    if (strcmp(topic, topic_data) == 0) {
-        JsonDocument doc;
-        if (deserializeJson(doc, payload, length)) return;
-        strlcpy(model.track_artist, doc["artist"] | "", sizeof(model.track_artist));
-        strlcpy(model.track_name, doc["track"] | "", sizeof(model.track_name));
-        ui::now_playing_set_track(model.track_artist, model.track_name);
-        // No artwork object yet on the first play of a new cover (the server processes it async)
-        request_artwork(doc["artwork"]);
-        mark_data_received();
-    } else if (strcmp(topic, topic_progress) == 0) {
-        // Plain numeric payload, 0-100
+    // Find the device whose base topic prefixes this one
+    int index = -1;
+    const char *suffix = nullptr;
+    for (int i = 0; i < model.device_count; i++) {
+        size_t n = strlen(model.devices[i].mqtt_topic);
+        if (strncmp(topic, model.devices[i].mqtt_topic, n) == 0 && topic[n] == '/') {
+            index  = i;
+            suffix = topic + n + 1;
+            break;
+        }
+    }
+    if (index < 0) return;
+    Device &d    = model.devices[index];
+    bool current = index == model.current_device;
+
+    if (strcmp(suffix, "progress") == 0) {
         char value[8];
         if (length >= sizeof(value)) return;
         memcpy(value, payload, length);
-        value[length] = '\0';
-        model.track_progress = constrain(atoi(value), 0, 100);
-        ui::now_playing_set_progress(model.track_progress);
-        mark_data_received();
+        value[length]  = '\0';
+        d.progress     = constrain(atoi(value), 0, 100);
+        d.last_data_ms = millis();
+        if (current) ui::now_playing_update(d, ui::kUpdateProgress);
+        return;
+    }
+
+    if (strcmp(suffix, "data") == 0) {
+        // Empty (retained-clear) payload = nothing playing on this device
+        if (length == 0) {
+            clear_track(d);
+            device_artwork[index] = {};
+        } else {
+            JsonDocument doc;
+            if (deserializeJson(doc, payload, length)) return;
+            strlcpy(d.artist, doc["artist"] | "", sizeof(d.artist));
+            strlcpy(d.track, doc["track"] | "", sizeof(d.track));
+            // No artwork object yet on the first play of a new cover (the server processes it async)
+            parse_artwork(doc["artwork"], device_artwork[index]);
+            d.last_data_ms = millis();
+        }
+        if (current) artwork::request(device_artwork[index]);
+        changed(index, ui::kUpdateTrack);
+        return;
+    }
+
+    JsonDocument doc;
+    if (deserializeJson(doc, payload, length)) return;
+
+    if (strcmp(suffix, "state") == 0) {
+        d.state = parse_state(doc["state"]);
+        if (d.state == PlayState::Playing) d.last_data_ms = millis();
+        if (!d.active()) clear_track(d);
+        changed(index, ui::kUpdateState | ui::kUpdateTrack);
+    } else if (strcmp(suffix, "volume") == 0) {
+        d.volume = doc["volume"] | d.volume;
+        d.muted  = doc["muted"] | d.muted;
+        if (current) ui::now_playing_update(d, ui::kUpdateVolume);
+    } else if (strcmp(suffix, "modes") == 0) {
+        d.shuffle = parse_tristate(doc["shuffle"]);
+        d.repeat  = parse_repeat(doc["repeat"]);
+        d.liked   = parse_tristate(doc["liked"]);
+        if (current) ui::now_playing_update(d, ui::kUpdateModes);
     }
 }
 
-static void unsubscribe() {
-    if (subscribed_topic[0] && mqtt.connected()) {
-        mqtt.unsubscribe(topic_data);
-        mqtt.unsubscribe(topic_progress);
+// Subscribes to everything of every assigned device (state and track feed the device list)
+static void resubscribe() {
+    if (!mqtt.connected()) return;
+    for (uint8_t i = 0; i < subscribed_count; i++) mqtt.unsubscribe(subscribed[i]);
+    subscribed_count = 0;
+    for (uint8_t i = 0; i < model.device_count; i++) {
+        snprintf(subscribed[i], sizeof(subscribed[i]), "%s/#", model.devices[i].mqtt_topic);
+        mqtt.subscribe(subscribed[i]);
+        subscribed_count++;
     }
-    subscribed_topic[0] = '\0';
-}
-
-static void subscribe() {
-    const Device *d = model.device();
-    if (!d || !mqtt.connected()) return;
-    snprintf(topic_data, sizeof(topic_data), "%s/data", d->mqtt_topic);
-    snprintf(topic_progress, sizeof(topic_progress), "%s/progress", d->mqtt_topic);
-    mqtt.subscribe(topic_data);
-    mqtt.subscribe(topic_progress);
-    strlcpy(subscribed_topic, d->mqtt_topic, sizeof(subscribed_topic));
 }
 
 static void connect() {
@@ -96,8 +160,8 @@ static void connect() {
     String client_id = "remoment-client-" + gwChipId();
     if (mqtt.connect(client_id.c_str())) {
         Serial.println("[mqtt] connected");
-        subscribed_topic[0] = '\0';
-        subscribe();
+        subscribed_count = 0;
+        resubscribe();
     } else {
         Serial.printf("[mqtt] connect to %s:%u failed, rc=%d\n", model.mqtt_host, model.mqtt_port, mqtt.state());
     }
@@ -109,17 +173,20 @@ void begin() {
     mqtt.setBufferSize(1024);  // /data carries artwork URLs and colors
 }
 
+void devices_changed() {
+    resubscribe();
+    ui::devices_sync(model.devices, model.device_count, model.current_device);
+}
+
 void device_changed() {
-    unsubscribe();
-    model.is_playing      = false;
-    model.track_artist[0] = '\0';
-    model.track_name[0]   = '\0';
-    model.track_progress  = 0;
     const Device *d = model.device();
-    ui::now_playing_set_device(d ? d->name : "");
-    ui::now_playing_set_playing(false);
-    artwork::clear();
-    subscribe();
+    if (d) {
+        ui::now_playing_update(*d, ui::kUpdateAll);
+        artwork::request(device_artwork[model.current_device]);
+    } else {
+        artwork::clear();
+    }
+    ui::devices_sync(model.devices, model.device_count, model.current_device);
 }
 
 void loop() {
@@ -131,9 +198,14 @@ void loop() {
     mqtt.loop();
     model.mqtt_connected = mqtt.connected();
 
-    if (model.is_playing && millis() - model.last_data_ms > kNotPlayingTimeoutMs) {
-        model.is_playing = false;
-        ui::now_playing_set_playing(false);
+    // Fallback when the server goes quiet: no progress for a while = not playing
+    unsigned long now = millis();
+    for (int i = 0; i < model.device_count; i++) {
+        Device &d = model.devices[i];
+        if (d.state == PlayState::Playing && now - d.last_data_ms > kNotPlayingTimeoutMs) {
+            d.state = PlayState::Unknown;
+            changed(i, ui::kUpdateState);
+        }
     }
 }
 

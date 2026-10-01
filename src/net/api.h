@@ -11,6 +11,7 @@ namespace api {
 int get(const char *path, JsonDocument &response);
 int post(const char *path, const JsonDocument &body, JsonDocument &response);
 int put(const char *path, const JsonDocument &body, JsonDocument &response);
+int del(const char *path, JsonDocument &response);
 
 // Same as get(), for an absolute URL (used during discovery, before server_url is known).
 int get_url(const char *url, JsonDocument &response);

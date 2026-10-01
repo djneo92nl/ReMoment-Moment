@@ -12,6 +12,10 @@ struct Layout {
     lv_coord_t margin;     // outer padding
     lv_coord_t gap;        // spacing between elements
     lv_coord_t cover;      // album art size (square)
+    lv_coord_t btn_large;  // play/pause
+    lv_coord_t btn;        // previous/next, header buttons
+    lv_coord_t btn_small;  // shuffle/repeat/like
+    lv_coord_t row;        // list row height
     bool       landscape;
     const lv_font_t *font_title;  // track name
     const lv_font_t *font_body;   // artist, status text
@@ -30,6 +34,10 @@ inline Layout make_layout() {
     l.gap       = l.margin / 2;
     // Covers are rendered by the server at 320 px; don't upscale beyond that
     l.cover      = LV_MIN(320, l.landscape ? b.height - 2 * l.margin - 120 : b.width - 2 * l.margin);
+    l.btn_large  = large ? 96 : 64;
+    l.btn        = large ? 72 : 48;
+    l.btn_small  = large ? 52 : 40;
+    l.row        = large ? 88 : 64;
     l.font_title = large ? &lv_font_montserrat_32 : &lv_font_montserrat_20;
     l.font_body  = large ? &lv_font_montserrat_20 : &lv_font_montserrat_16;
     l.font_small = large ? &lv_font_montserrat_16 : &lv_font_montserrat_12;

@@ -54,6 +54,8 @@ int put(const char *path, const JsonDocument &body, JsonDocument &response) {
     return request("PUT", api_url(path), &body, response);
 }
 
+int del(const char *path, JsonDocument &response) { return request("DELETE", api_url(path), nullptr, response); }
+
 int get_url(const char *url, JsonDocument &response) { return request("GET", url, nullptr, response); }
 
 }  // namespace api

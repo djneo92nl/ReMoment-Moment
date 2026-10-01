@@ -58,8 +58,9 @@ static String device_str() {
 }
 static String devices_str() { return String(model.device_count); }
 static String track_str() {
-    if (!model.is_playing) return "Not playing";
-    return String(model.track_artist) + " - " + model.track_name + " (" + model.track_progress + "%)";
+    const Device *d = model.device();
+    if (!d || !d->active()) return "Not playing";
+    return String(d->artist) + " - " + d->track + " (" + d->progress + "%)";
 }
 static String battery_str() {
     return model.battery_voltage > 0.0f ? String(model.battery_voltage, 2) + " V" : String("-");

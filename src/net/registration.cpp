@@ -24,24 +24,61 @@ static void add_client_info(JsonDocument &body) {
     body["build_number"]     = BUILD_NUMBER;
 }
 
+static uint16_t parse_capabilities(JsonArrayConst caps) {
+    static const struct { const char *name; uint16_t bit; } kMap[] = {
+        {"media_controls", kCapMediaControls}, {"volume_control", kCapVolume},
+        {"radio_control", kCapRadio},          {"source_control", kCapSources},
+        {"source_activation", kCapSourceActivation}, {"multi_room", kCapMultiroom},
+        {"library_playback", kCapLibraryPlayback},   {"seek", kCapSeek},
+        {"queue", kCapQueue},                  {"shuffle", kCapShuffle},
+        {"repeat", kCapRepeat},                {"like", kCapLike},
+        {"power", kCapPower},
+    };
+    uint16_t bits = 0;
+    for (const char *c : caps) {
+        if (!c) continue;
+        for (const auto &m : kMap)
+            if (strcmp(c, m.name) == 0) bits |= m.bit;
+    }
+    return bits;
+}
+
+static PlayState parse_state(const char *s) {
+    if (!s) return PlayState::Unknown;
+    if (strcmp(s, "playing") == 0) return PlayState::Playing;
+    if (strcmp(s, "paused") == 0) return PlayState::Paused;
+    if (strcmp(s, "standby") == 0) return PlayState::Standby;
+    if (strcmp(s, "unreachable") == 0) return PlayState::Unreachable;
+    return PlayState::Unknown;
+}
+
 static bool load_devices(JsonArrayConst devices) {
     int previous_id = model.device() ? model.device()->id : settings::last_device_id();
 
-    model.device_count   = 0;
-    model.current_device = -1;
+    // Rebuild the list, keeping live MQTT state for devices that are still assigned
+    static Device fresh[kMaxDevices];
+    uint8_t count = 0;
+    int current   = -1;
     for (JsonObjectConst d : devices) {
-        if (model.device_count >= kMaxDevices) break;
-        Device &dev = model.devices[model.device_count];
-        dev.id = d["id"] | -1;
-        if (dev.id < 0) continue;
+        if (count >= kMaxDevices) break;
+        int id = d["id"] | -1;
+        if (id < 0) continue;
+        int old = model.index_of(id);
+        Device &dev = fresh[count];
+        dev = old >= 0 ? model.devices[old] : Device{};
+        dev.id = id;
         strlcpy(dev.name, d["device_name"] | "", sizeof(dev.name));
         strlcpy(dev.mqtt_topic, d["mqtt_topic"] | "", sizeof(dev.mqtt_topic));
-        if (!dev.mqtt_topic[0]) snprintf(dev.mqtt_topic, sizeof(dev.mqtt_topic), "remoment/player/%d", dev.id);
-        if (dev.id == previous_id) model.current_device = model.device_count;
-        model.device_count++;
+        if (!dev.mqtt_topic[0]) snprintf(dev.mqtt_topic, sizeof(dev.mqtt_topic), "remoment/player/%d", id);
+        dev.caps = parse_capabilities(d["capabilities"]);
+        if (old < 0) dev.state = parse_state(d["state"]);
+        if (id == previous_id) current = count;
+        count++;
     }
+    memcpy(model.devices, fresh, sizeof(Device) * count);
+    model.device_count = count;
     // Server sort order: first assigned device is the default
-    if (model.current_device < 0 && model.device_count > 0) model.current_device = 0;
+    model.current_device = current >= 0 ? current : (count > 0 ? 0 : -1);
     if (model.device()) settings::set_last_device_id(model.device()->id);
     return true;
 }

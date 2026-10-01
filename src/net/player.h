@@ -1,14 +1,17 @@
-// MQTT connection and now-playing state for the current device.
+// MQTT connection and live state for all assigned devices.
 #pragma once
 
 namespace player {
 
 void begin();
 
-// Keeps MQTT connected, follows model.current_device, detects "not playing". Call every loop().
+// Keeps MQTT connected and detects "not playing". Call every loop().
 void loop();
 
-// Call after model.current_device changed: resubscribes and resets the now-playing state.
+// Call after the assigned device list changed: resubscribes and refreshes the device list screen.
+void devices_changed();
+
+// Call after model.current_device changed: re-renders Now Playing for the new device.
 void device_changed();
 
 }  // namespace player

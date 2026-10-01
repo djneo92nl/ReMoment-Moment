@@ -13,6 +13,7 @@
 #include "artwork/artwork.h"
 #include "board/board.h"
 #include "model.h"
+#include "net/commands.h"
 #include "net/player.h"
 #include "net/registration.h"
 #include "net/server.h"
@@ -46,6 +47,7 @@ static bool network_up() {
 static void enter_running() {
     model.phase = Phase::Running;
     last_device_refresh_ms = millis();
+    player::devices_changed();
     player::device_changed();
     ui::show_now_playing();
 }
@@ -56,6 +58,7 @@ static void restart_flow() {
     model.mqtt_host[0]  = '\0';
     model.phase         = Phase::Network;
     last_discover_ms    = 0;
+    player::devices_changed();
     player::device_changed();
 }
 
@@ -107,6 +110,7 @@ static void step_registering() {
 
 static void step_running() {
     player::loop();
+    commands::loop();
     registration::heartbeat_loop();
 
     unsigned long now = millis();
@@ -115,6 +119,7 @@ static void step_running() {
         int before = model.device() ? model.device()->id : -1;
         if (registration::refresh_devices()) {
             int after = model.device() ? model.device()->id : -1;
+            player::devices_changed();
             if (after != before) player::device_changed();
         }
     }
@@ -153,6 +158,7 @@ void setup() {
     gwBegin(cfg);
 
     artwork::begin(model.sd_available);
+    commands::begin();
     player::begin();
 }
 
