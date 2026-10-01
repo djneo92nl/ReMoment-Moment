@@ -339,8 +339,8 @@ void build(const Layout &l) {
     // Cover: a plain square placeholder, with the two artwork layers on top
     cover_box = widgets::box(scr);
     lv_obj_set_size(cover_box, l.cover, l.cover);
-    lv_obj_set_style_radius(cover_box, l.landscape ? 16 : 12, 0);
-    lv_obj_set_style_clip_corner(cover_box, true, 0);
+    // Square on purpose: clip_corner renders the cover through a masked layer in PSRAM, and on
+    // the 7" RGB panel that extra traffic brought the glitches back
     lv_obj_t *placeholder = widgets::box(cover_box);
     lv_obj_set_size(placeholder, lv_pct(100), lv_pct(100));
     lv_obj_set_style_bg_color(placeholder, lv_color_hex(0x1A1A1A), 0);
@@ -503,7 +503,7 @@ void update(const Device &d, uint8_t what) {
         show_play_state();
     }
     if (what & kUpdateProgress) {
-        lv_bar_set_value(progress_bar, d.progress, LV_ANIM_ON);
+        lv_bar_set_value(progress_bar, d.progress, LV_ANIM_OFF);  // an animation per update keeps redrawing
         // Resync the local clock only when it drifted further than the percentage's resolution
         if (shown.duration > 0) {
             int from_server = d.progress * shown.duration / 100;

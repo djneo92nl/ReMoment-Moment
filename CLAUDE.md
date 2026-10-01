@@ -72,7 +72,7 @@ MCU:           ESP32-S3, Arduino-ESP32 3.x (ESP-IDF 5.5, FreeRTOS)
 
 ### Key Hardware Config
 
-- Display: 1024×600, RGB565 (16-bit), 30 MHz pixel clock (≈33 Hz; 20 MHz ≈ 22 Hz visibly flickers) — see `lib/rgb_lcd_port/rgb_lcd_port.h`. Glitch-free only with the `custom_sdkconfig` in `platformio.ini` (RGB/GDMA ISR IRAM-safe, PSRAM XIP, 64 KB / 64 B data cache); pioarduino recompiles the **shared** framework install for it, so both envs share the same settings
+- Display: 1024×600, RGB565 (16-bit), 30 MHz pixel clock (≈33 Hz; 20 MHz ≈ 22 Hz visibly flickers) — see `lib/rgb_lcd_port/rgb_lcd_port.h`. Glitch-free only with the `custom_sdkconfig` in `platformio.ini` (RGB/GDMA ISR IRAM-safe, PSRAM XIP, 64 KB / 64 B data cache); pioarduino recompiles the **shared** framework install for it, so both envs share the same settings. The RGB panel is sensitive to PSRAM load: avoid `clip_corner`, layer-heavy styles and continuous animations on large areas (both brought glitches back)
 - Touch: GT911 capacitive controller over I2C, INT on GPIO 4 — see `lib/touch/gt911.h`
 - LVGL draw buffer in PSRAM, anti-tearing currently disabled (single LCD framebuffer + bounce buffer) — see `lib/lvgl_port/lvgl_port.h` and `lib/rgb_lcd_port/rgb_lcd_port.h`
 - LVGL memory pool: 48 KB; refresh period: 30 ms — see `lib/lv_conf.h`
