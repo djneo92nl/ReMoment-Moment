@@ -32,7 +32,7 @@
  */
 #define EXAMPLE_LCD_H_RES               (1024)  ///< Horizontal resolution in pixels
 #define EXAMPLE_LCD_V_RES               (600)  ///< Vertical resolution in pixels
-#define EXAMPLE_LCD_PIXEL_CLOCK_HZ      (30 * 1000 * 1000) ///< ~33 Hz refresh with the porches below (20 MHz = ~22 Hz flickers; 26 MHz = ~28 Hz, slight flicker)
+#define EXAMPLE_LCD_PIXEL_CLOCK_HZ      (28 * 1000 * 1000) ///< ~30 Hz refresh with the porches below (20 MHz = ~22 Hz flickers; 26 MHz = ~28 Hz, slight flicker; 30 MHz more glitches)
 
 /**
  * @brief Color and Pixel Configuration
