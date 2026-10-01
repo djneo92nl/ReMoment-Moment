@@ -224,7 +224,7 @@ static void build_volume_overlay(const Layout &l) {
 static void on_gesture(lv_dir_t dir) {
     switch (dir) {
         case LV_DIR_TOP:    nav::to_devices(); break;
-        case LV_DIR_BOTTOM: nav::toast("Library - coming soon"); break;
+        case LV_DIR_BOTTOM: nav::to_library(); break;
         case LV_DIR_LEFT:
         case LV_DIR_RIGHT:  open_volume(); break;
         default: break;

@@ -29,7 +29,9 @@ struct Kind {
 };
 
 static Kind covers, backgrounds;
-static QueueHandle_t queue;
+static QueueHandle_t queue;        // Request, length 1 (latest wins)
+static QueueHandle_t thumb_queue;  // ThumbRequest
+static TaskHandle_t  task_handle;
 static JPEGDEC *jpeg;
 
 static int on_draw(JPEGDRAW *draw) {
@@ -112,20 +114,83 @@ static const lv_img_dsc_t *load(Kind &kind, cache::Kind cache_kind, const char *
     return &slot.dsc;
 }
 
+// ---- Thumbnails for the library screens ------------------------------------------
+// Each decoded thumbnail gets its own PSRAM buffer, tagged with the UI's token. The UI
+// bumps the generation in the token when it rebuilds a screen; buffers of older
+// generations are freed here once the UI has dropped its references (thumbs_release).
+
+static const int kMaxThumbs     = 96;
+static const int kThumbQueueLen = 48;
+
+struct ThumbRequest {
+    uint32_t token;
+    bool     large;
+    char     url[192];
+};
+
+struct Thumb {
+    uint32_t     token;
+    lv_img_dsc_t dsc;
+    uint8_t     *pixels;
+};
+
+static Thumb thumbs[kMaxThumbs];
+static int   thumb_count = 0;
+static volatile uint32_t thumb_generation = 0;
+
+static uint32_t generation_of(uint32_t token) { return token >> 16; }
+
+static void free_stale_thumbs() {
+    uint32_t gen = thumb_generation;
+    int kept = 0;
+    for (int i = 0; i < thumb_count; i++) {
+        if (generation_of(thumbs[i].token) == gen) {
+            thumbs[kept++] = thumbs[i];
+        } else {
+            free(thumbs[i].pixels);
+        }
+    }
+    thumb_count = kept;
+}
+
+// Returns false when there was nothing to do
+static bool process_thumb() {
+    ThumbRequest r;
+    if (!thumb_queue || xQueueReceive(thumb_queue, &r, 0) != pdTRUE) return false;
+    if (generation_of(r.token) != thumb_generation || thumb_count >= kMaxThumbs) return true;
+
+    String path = cache::fetch(r.large ? cache::Kind::Cover : cache::Kind::Thumb, r.url);
+    if (path.isEmpty()) return true;
+    Slot slot = {};
+    if (!decode(path, slot)) {
+        free(slot.pixels);
+        return true;
+    }
+    Thumb &t = thumbs[thumb_count];
+    t = {r.token, slot.dsc, slot.pixels};
+    if (ui::library_thumb(t.token, &t.dsc)) thumb_count++;
+    else free(t.pixels);  // the screen moved on meanwhile
+    return true;
+}
+
 // ---- Pre-caching: while idle, fill the SD card from the server's artwork list ----
 // (GET /api/clients/{token}/artwork: source logos, then albums most recently played first)
 
-static const TickType_t    kIdleBeforePrecache = pdMS_TO_TICKS(30000);
-static const unsigned long kPrecacheIntervalMs = 6UL * 60 * 60 * 1000;
+static const unsigned long kIdleBeforePrecacheMs = 30000;
+static const unsigned long kPrecacheIntervalMs   = 6UL * 60 * 60 * 1000;
 
 static long          precache_cursor  = 0;   // -1 = sweep finished
 static unsigned long precache_done_ms = 0;
+static unsigned long last_request_ms  = 0;
 
-static bool busy() { return uxQueueMessagesWaiting(queue) > 0; }
+static bool busy() {
+    return uxQueueMessagesWaiting(queue) > 0 || (thumb_queue && uxQueueMessagesWaiting(thumb_queue) > 0);
+}
 
 // One page of the list. Returns false when there's nothing more to do for now.
 static bool precache_page() {
     if (model.phase != Phase::Running || busy()) return false;
+    if (millis() - last_request_ms < kIdleBeforePrecacheMs) return false;
     if (precache_cursor < 0) {
         if (millis() - precache_done_ms < kPrecacheIntervalMs) return false;
         precache_cursor = 0;  // start a new sweep
@@ -141,9 +206,10 @@ static bool precache_page() {
     if (!api::ok(api::get(path.c_str(), page))) return false;
 
     for (JsonObjectConst item : page["data"].as<JsonArrayConst>()) {
-        if (busy()) return false;  // a track change wins; resume this page later
+        if (busy()) return false;  // a track change or a library screen wins; resume this page later
         if (!cache::nearly_full(cache::Kind::Cover)) cache::fetch(cache::Kind::Cover, item["proxy_320"] | "", false);
         if (!cache::nearly_full(cache::Kind::Background)) cache::fetch(cache::Kind::Background, item["proxy_bg"] | "", false);
+        if (!cache::nearly_full(cache::Kind::Thumb)) cache::fetch(cache::Kind::Thumb, item["proxy_120"] | "", false);
     }
 
     if (page["next_cursor"].isNull()) {
@@ -156,27 +222,38 @@ static bool precache_page() {
     return true;
 }
 
+// ---------------------------------------------------------------------------------
+
+static void show(Request &req, bool cache_ok) {
+    if (!cache_ok) req.cover_url[0] = req.background_url[0] = '\0';
+
+    // No cover (or still being processed on the server): show the server's placeholder logo
+    if (cache_ok && !req.cover_url[0]) strlcpy(req.cover_url, model.placeholder_url, sizeof(req.cover_url));
+
+    bool cover_changed, background_changed;
+    const lv_img_dsc_t *cover      = load(covers, cache::Kind::Cover, req.cover_url, cover_changed);
+    const lv_img_dsc_t *background = load(backgrounds, cache::Kind::Background, req.background_url, background_changed);
+    ui::artwork_show(cover, cover_changed, background, background_changed, req.has_accent, req.accent);
+}
+
 static void task(void *) {
     jpeg = new JPEGDEC();
     bool cache_ok = cache::begin();
     if (!cache_ok) Serial.println("[artwork] SD cache unavailable");
 
+    // Priority: now-playing artwork, then library thumbnails, then idle pre-caching
     Request req;
     for (;;) {
-        if (xQueueReceive(queue, &req, cache_ok ? kIdleBeforePrecache : portMAX_DELAY) != pdTRUE) {
-            while (precache_page()) {
-            }
+        free_stale_thumbs();
+        if (xQueueReceive(queue, &req, 0) == pdTRUE) {
+            last_request_ms = millis();
+            show(req, cache_ok);
             continue;
         }
-        if (!cache_ok) req.cover_url[0] = req.background_url[0] = '\0';
-
-        // No cover (or still being processed on the server): show the server's placeholder logo
-        if (cache_ok && !req.cover_url[0]) strlcpy(req.cover_url, model.placeholder_url, sizeof(req.cover_url));
-
-        bool cover_changed, background_changed;
-        const lv_img_dsc_t *cover      = load(covers, cache::Kind::Cover, req.cover_url, cover_changed);
-        const lv_img_dsc_t *background = load(backgrounds, cache::Kind::Background, req.background_url, background_changed);
-        ui::artwork_show(cover, cover_changed, background, background_changed, req.has_accent, req.accent);
+        if (cache_ok && process_thumb()) continue;
+        if (cache_ok && precache_page()) continue;
+        // Sleep until request()/thumb_request() wakes us, or check the idle timer again
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(kIdleBeforePrecacheMs));
     }
 }
 
@@ -185,18 +262,35 @@ void begin(bool sd_available) {
         ui::now_playing_set_notice("Insert an SD card to show album art");
         return;
     }
-    queue = xQueueCreate(1, sizeof(Request));
+    queue       = xQueueCreate(1, sizeof(Request));
+    thumb_queue = xQueueCreate(kThumbQueueLen, sizeof(ThumbRequest));
     // Core 0 next to WiFi; LVGL renders on core 1
-    xTaskCreatePinnedToCore(task, "artwork", 8192, nullptr, 1, nullptr, 0);
+    xTaskCreatePinnedToCore(task, "artwork", 8192, nullptr, 1, &task_handle, 0);
 }
 
 void request(const Request &req) {
-    if (queue) xQueueOverwrite(queue, &req);
+    if (!queue) return;
+    xQueueOverwrite(queue, &req);
+    xTaskNotifyGive(task_handle);
 }
 
 void clear() {
     Request req = {};
     request(req);
+}
+
+bool thumb_request(uint32_t token, const char *url, bool large) {
+    if (!thumb_queue || !url || !*url) return false;
+    ThumbRequest r = {token, large, ""};
+    strlcpy(r.url, url, sizeof(r.url));
+    bool queued = xQueueSend(thumb_queue, &r, 0) == pdTRUE;
+    xTaskNotifyGive(task_handle);
+    return queued;
+}
+
+void thumbs_release(uint32_t generation) {
+    thumb_generation = generation;
+    if (task_handle) xTaskNotifyGive(task_handle);
 }
 
 }  // namespace artwork

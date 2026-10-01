@@ -46,6 +46,42 @@ struct Option {
 };
 void details_set_options(int device_id, Section section, const Option *options, int count);
 
+// Library (swipe down from Now Playing). Data is loaded by commands::Type::Load*.
+enum class LibView : uint8_t { Recent, Favorites, Artists };
+enum class LibKind : uint8_t { Album, Artist };
+struct LibItem {
+    LibKind kind;
+    int     id;
+    char    title[64];
+    char    subtitle[64];
+    char    thumb[192];  // proxy_120 URL, "" = none
+    bool    favorite;
+};
+struct LibTrack {
+    int  id;
+    char name[64];
+    int  duration;  // seconds, -1 = unknown
+    bool playable;
+};
+struct LibAlbum {
+    int  id;
+    char name[64];
+    int  artist_id;
+    char artist[64];
+    int  year;        // 0 = unknown
+    char cover[192];  // proxy_320 URL
+    bool favorite;
+    bool playable;
+};
+// `append` adds a page to the list; `more` = another page can be loaded
+void library_set_items(LibView view, const LibItem *items, int count, bool append, bool more);
+void library_set_artist(int artist_id, const char *name, bool favorite, const LibItem *albums, int count);
+void library_set_album(const LibAlbum &album, const LibTrack *tracks, int count);
+void library_load_failed();
+// From the artwork task: a thumbnail for `token` is decoded. Returns false when the
+// screen no longer wants it (the caller then frees the image).
+bool library_thumb(uint32_t token, const lv_img_dsc_t *image);
+
 // Short message in the middle of the screen (errors, confirmations)
 void toast(const char *text);
 

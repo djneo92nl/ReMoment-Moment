@@ -23,7 +23,7 @@ static unsigned long last_volume_ms = 0;
 
 void begin() { queue = xQueueCreate(16, sizeof(Command)); }
 
-void post(Type type, int device_id, int value, const char *text) {
+void post(Type type, int device_id, int value, const char *text, int value2) {
     if (type == Type::Volume) {
         portENTER_CRITICAL(&volume_mux);
         volume_device = device_id;
@@ -31,7 +31,7 @@ void post(Type type, int device_id, int value, const char *text) {
         portEXIT_CRITICAL(&volume_mux);
         return;
     }
-    Command c = {type, device_id, value, ""};
+    Command c = {type, device_id, value, value2, ""};
     if (text) strlcpy(c.text, text, sizeof(c.text));
     if (queue && xQueueSend(queue, &c, 0) != pdTRUE) Serial.println("[commands] queue full, dropped");
 }
@@ -139,6 +139,149 @@ static void load_details(int device_id) {
     }
 }
 
+// ---- Library ----------------------------------------------------------------------
+
+static const int kMaxItems  = 60;
+static const int kMaxTracks = 100;
+
+static ui::LibItem  *items;   // PSRAM, allocated on first use
+static ui::LibTrack *tracks;
+static String        artists_cursor;  // next page of the artist list, "" = none
+
+static bool ensure_buffers() {
+    if (!items) items = (ui::LibItem *)ps_calloc(kMaxItems, sizeof(ui::LibItem));
+    if (!tracks) tracks = (ui::LibTrack *)ps_calloc(kMaxTracks, sizeof(ui::LibTrack));
+    return items && tracks;
+}
+
+static void album_item(JsonObjectConst a, ui::LibItem &it) {
+    it.kind = ui::LibKind::Album;
+    it.id   = a["id"] | 0;
+    strlcpy(it.title, a["name"] | "", sizeof(it.title));
+    int year = a["year"] | 0;
+    if (year > 0) snprintf(it.subtitle, sizeof(it.subtitle), "%s  \xC2\xB7  %d", (const char *)(a["artist_name"] | ""), year);
+    else strlcpy(it.subtitle, a["artist_name"] | "", sizeof(it.subtitle));
+    strlcpy(it.thumb, a["artwork"]["proxy_120"] | "", sizeof(it.thumb));
+    it.favorite = a["favorite"] | false;
+}
+
+static void artist_item(JsonObjectConst a, ui::LibItem &it) {
+    it.kind = ui::LibKind::Artist;
+    it.id   = a["id"] | 0;
+    strlcpy(it.title, a["name"] | "", sizeof(it.title));
+    int albums = a["album_count"] | 0;
+    snprintf(it.subtitle, sizeof(it.subtitle), albums == 1 ? "1 album" : "%d albums", albums);
+    strlcpy(it.thumb, a["artwork"]["proxy_120"] | "", sizeof(it.thumb));
+    it.favorite = a["favorite"] | false;
+}
+
+static int add_items(JsonArrayConst list, int n, void (*fill)(JsonObjectConst, ui::LibItem &)) {
+    for (JsonObjectConst o : list) {
+        if (n >= kMaxItems) break;
+        items[n] = {};
+        fill(o, items[n++]);
+    }
+    return n;
+}
+
+static void load_library(ui::LibView view, bool next_page) {
+    if (!ensure_buffers()) return;
+    JsonDocument res;
+    int n = 0;
+    switch (view) {
+        case ui::LibView::Recent:
+            if (!api::ok(api::get("/library/recent?limit=48", res))) return ui::library_load_failed();
+            n = add_items(res["data"], 0, album_item);
+            ui::library_set_items(view, items, n, false, false);
+            break;
+        case ui::LibView::Favorites:
+            if (!api::ok(api::get("/library/favorites", res))) return ui::library_load_failed();
+            n = add_items(res["albums"], 0, album_item);
+            n = add_items(res["artists"], n, artist_item);
+            ui::library_set_items(view, items, n, false, false);
+            break;
+        case ui::LibView::Artists: {
+            if (next_page && artists_cursor.isEmpty()) return;
+            String path = "/library/artists";
+            if (next_page) path += "?cursor=" + artists_cursor;
+            if (!api::ok(api::get(path.c_str(), res))) return ui::library_load_failed();
+            n = add_items(res["data"], 0, artist_item);
+            JsonVariantConst next = res["next_cursor"];
+            artists_cursor = next.isNull() ? String() : next.as<String>();
+            ui::library_set_items(view, items, n, next_page, !artists_cursor.isEmpty());
+            break;
+        }
+    }
+}
+
+static void load_artist(int artist_id) {
+    if (!ensure_buffers()) return;
+    JsonDocument res;
+    String path = String("/library/artists/") + artist_id;
+    if (!api::ok(api::get(path.c_str(), res))) return ui::library_load_failed();
+    int n = add_items(res["albums"], 0, album_item);
+    ui::library_set_artist(artist_id, res["name"] | "", res["favorite"] | false, items, n);
+}
+
+static void load_album(int album_id) {
+    if (!ensure_buffers()) return;
+    JsonDocument res;
+    String path = String("/library/albums/") + album_id;
+    if (!api::ok(api::get(path.c_str(), res))) return ui::library_load_failed();
+
+    ui::LibAlbum album = {};
+    album.id = album_id;
+    strlcpy(album.name, res["name"] | "", sizeof(album.name));
+    album.artist_id = res["artist"]["id"] | 0;
+    strlcpy(album.artist, res["artist"]["name"] | "", sizeof(album.artist));
+    album.year = res["year"] | 0;
+    strlcpy(album.cover, res["artwork"]["proxy_320"] | "", sizeof(album.cover));
+    album.favorite = res["favorite"] | false;
+    album.playable = res["playable"] | false;
+
+    int n = 0;
+    for (JsonObjectConst t : res["tracks"].as<JsonArrayConst>()) {
+        if (n >= kMaxTracks) break;
+        ui::LibTrack &tr = tracks[n++];
+        tr.id = t["id"] | 0;
+        strlcpy(tr.name, t["name"] | "", sizeof(tr.name));
+        tr.duration = t["duration"] | -1;
+        tr.playable = t["playable"] | false;
+    }
+    ui::library_set_album(album, tracks, n);
+}
+
+static void play_from_library(Command c) {
+    // -1 = whatever device is current when the command runs
+    if (c.device_id < 0) {
+        if (!model.device()) return ui::toast("No device selected");
+        c.device_id = model.device()->id;
+    }
+    JsonDocument body, res;
+    const char *path;
+    if (c.type == Type::PlayAlbum) {
+        path = "library/play-album";
+        body["album_id"] = c.value;
+        if (c.value2 > 0) body["start_track_id"] = c.value2;
+    } else {
+        path = "library/play-artist";
+        body["artist_id"] = c.value;
+        body["shuffle"]   = true;
+    }
+    if (report(api::post(device_path(c.device_id, path).c_str(), body, res), c.device_id, res)) {
+        String msg = String("Playing on ") + device_name(c.device_id);
+        ui::toast(msg.c_str());
+    }
+}
+
+static void set_favorite(const Command &c) {
+    JsonDocument body, res;
+    body["favorite"] = c.value2 != 0;
+    String path = String("/library/") + (c.type == Type::FavoriteAlbum ? "albums/" : "artists/") + c.value + "/favorite";
+    int status = api::put(path.c_str(), body, res);
+    if (!api::ok(status)) ui::toast(status <= 0 ? "Can't reach the server" : "Couldn't save the favorite");
+}
+
 // ---------------------------------------------------------------------------------
 
 static void run(const Command &c) {
@@ -198,6 +341,13 @@ static void run(const Command &c) {
                 ui::toast("Left the group");
             break;
         }
+        case Type::LoadLibrary:    load_library((ui::LibView)c.value, c.text[0] != '\0'); break;
+        case Type::LoadArtist:     load_artist(c.value); break;
+        case Type::LoadAlbum:      load_album(c.value); break;
+        case Type::PlayAlbum:
+        case Type::PlayArtist:     play_from_library(c); break;
+        case Type::FavoriteAlbum:
+        case Type::FavoriteArtist: set_favorite(c); break;
         case Type::Volume: break;  // handled below
     }
 }

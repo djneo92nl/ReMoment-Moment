@@ -22,4 +22,12 @@ void request(const Request &req);
 // Back to the placeholder (device changed, track without artwork).
 void clear();
 
+// Library thumbnails: load `url` (proxy_120, or proxy_320 when `large`) and hand the decoded
+// image to ui::library_thumb(token, image). Upper 16 bits of `token` = UI generation.
+// Safe from any task. Returns false when the request couldn't be queued.
+bool thumb_request(uint32_t token, const char *url, bool large = false);
+
+// The UI dropped every thumbnail older than `generation`: their buffers can be freed.
+void thumbs_release(uint32_t generation);
+
 }  // namespace artwork

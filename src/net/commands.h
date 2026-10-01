@@ -23,19 +23,27 @@ enum class Type : uint8_t {
     PlayRadio,       // value = station id
     JoinGroup,       // value = host device id
     LeaveGroup,
+    LoadLibrary,     // value = ui::LibView, text = cursor ("" = first page)
+    LoadArtist,      // value = artist id
+    LoadAlbum,       // value = album id
+    PlayAlbum,       // value = album id, value2 = start track id (0 = from the start)
+    PlayArtist,      // value = artist id (shuffled)
+    FavoriteAlbum,   // value = album id, value2 = 0/1
+    FavoriteArtist,  // value = artist id, value2 = 0/1
 };
 
 struct Command {
     Type type;
     int  device_id;
     int  value;
+    int  value2;
     char text[48];
 };
 
 void begin();
 
 // Safe from any task
-void post(Type type, int device_id, int value = 0, const char *text = nullptr);
+void post(Type type, int device_id, int value = 0, const char *text = nullptr, int value2 = 0);
 
 void loop();
 

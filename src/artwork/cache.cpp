@@ -26,11 +26,12 @@ struct Folder {
 static Folder folders[] = {
     {"/remoment/covers", "/remoment/.lru/covers", 3000, 0},
     {"/remoment/backgrounds", "/remoment/.lru/backgrounds", 1000, 0},
+    {"/remoment/thumbs", "/remoment/.lru/thumbs", 5000, 0},
 };
 
 static uint32_t seq = 0;
 
-static Folder &folder(Kind kind) { return folders[kind == Kind::Cover ? 0 : 1]; }
+static Folder &folder(Kind kind) { return folders[(int)kind]; }
 
 static uint32_t read_number(const String &path) {
     File f = SD_MMC.open(path, FILE_READ);

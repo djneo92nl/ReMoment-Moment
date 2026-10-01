@@ -2,6 +2,7 @@
 
 #include "devices.h"
 #include "layout.h"
+#include "library.h"
 #include "nav.h"
 #include "now_playing.h"
 #include "widgets.h"
@@ -74,8 +75,10 @@ static void load(lv_obj_t *screen, lv_scr_load_anim_t anim) {
 }
 
 void nav::to_now_playing() {
-    lv_scr_load_anim_t anim = lv_scr_act() == devices::list_screen() ? LV_SCR_LOAD_ANIM_MOVE_BOTTOM
-                                                                       : LV_SCR_LOAD_ANIM_FADE_ON;
+    lv_obj_t *from = lv_scr_act();
+    lv_scr_load_anim_t anim = from == devices::list_screen() ? LV_SCR_LOAD_ANIM_MOVE_BOTTOM
+                            : from == library::screen()      ? LV_SCR_LOAD_ANIM_MOVE_TOP
+                                                             : LV_SCR_LOAD_ANIM_FADE_ON;
     load(now_playing::screen(), anim);
 }
 
@@ -88,6 +91,11 @@ void nav::to_devices() {
 void nav::to_details(int device_id) {
     devices::open_details(device_id);
     load(devices::details_screen(), LV_SCR_LOAD_ANIM_MOVE_LEFT);
+}
+
+void nav::to_library() {
+    library::open_home();
+    load(library::screen(), LV_SCR_LOAD_ANIM_MOVE_BOTTOM);
 }
 
 static void hide_toast(lv_timer_t *timer) {
@@ -149,6 +157,31 @@ void details_set_options(int device_id, Section section, const Option *options, 
     if (lock) devices::set_options(device_id, section, options, count);
 }
 
+void library_set_items(LibView view, const LibItem *items, int count, bool append, bool more) {
+    LvglLock lock;
+    if (lock) library::set_items(view, items, count, append, more);
+}
+
+void library_set_artist(int artist_id, const char *name, bool favorite, const LibItem *albums, int count) {
+    LvglLock lock;
+    if (lock) library::set_artist(artist_id, name, favorite, albums, count);
+}
+
+void library_set_album(const LibAlbum &album, const LibTrack *tracks, int count) {
+    LvglLock lock;
+    if (lock) library::set_album(album, tracks, count);
+}
+
+void library_load_failed() {
+    LvglLock lock;
+    if (lock) library::load_failed();
+}
+
+bool library_thumb(uint32_t token, const lv_img_dsc_t *image) {
+    LvglLock lock;
+    return lock && library::thumb_ready(token, image);
+}
+
 void artwork_show(const lv_img_dsc_t *cover, bool cover_changed, const lv_img_dsc_t *background,
                   bool background_changed, bool has_accent, uint32_t accent) {
     LvglLock lock;
@@ -179,6 +212,7 @@ void init() {
     build_status_screen();
     now_playing::build(layout);
     devices::build(layout);
+    library::build(layout);
 
     connection_icon = widgets::label(lv_layer_top(), "", layout.font_body, color::error());
     lv_obj_align(connection_icon, LV_ALIGN_TOP_LEFT, layout.gap, layout.gap);
