@@ -36,25 +36,35 @@ static bool parse_hex_color(const char *s, uint32_t &out) {
 }
 
 // The LED wants a hue, not the readable-on-black safe colours (those are lightened and look
-// white on an LED): take the most saturated raw palette colour, at full brightness.
+// white on an LED). Take the most saturated raw palette colour at full brightness, with its
+// saturation pushed up: album palettes are often muted, and a pastel reads as white on an
+// LED. Grey palettes (hardly any hue) stay a soft white.
 static uint32_t led_color(JsonArrayConst colors) {
     uint32_t best = 0;
-    int best_sat = -1;
+    float best_sat = -1;
     for (const char *hex : colors) {
         uint32_t c;
         if (!parse_hex_color(hex, c)) continue;
-        int r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
-        int mx = max(r, max(g, b)), mn = min(r, min(g, b));
-        int sat = mx == 0 ? 0 : (mx - mn) * 255 / mx;
+        float r = ((c >> 16) & 0xFF) / 255.0f, g = ((c >> 8) & 0xFF) / 255.0f, b = (c & 0xFF) / 255.0f;
+        float mx = max(r, max(g, b)), mn = min(r, min(g, b));
+        float sat = mx > 0 ? (mx - mn) / mx : 0;
         if (sat > best_sat) {
             best_sat = sat;
             best     = c;
         }
     }
-    int r = (best >> 16) & 0xFF, g = (best >> 8) & 0xFF, b = best & 0xFF;
-    int mx = max(r, max(g, b));
-    if (mx == 0) return 0;
-    return (uint32_t)(r * 255 / mx) << 16 | (uint32_t)(g * 255 / mx) << 8 | (uint32_t)(b * 255 / mx);
+    float r = ((best >> 16) & 0xFF) / 255.0f, g = ((best >> 8) & 0xFF) / 255.0f, b = (best & 0xFF) / 255.0f;
+    float mx = max(r, max(g, b)), mn = min(r, min(g, b));
+    if (mx <= 0) return 0;
+
+    // HSV with V = 1 and a stronger S, same hue
+    float sat = (mx - mn) / mx;
+    float boosted = sat < 0.12f ? sat : min(0.8f, sat * 1.2f + 0.1f);
+    auto channel = [&](float v) {
+        float norm = mx > mn ? (v - mn) / (mx - mn) : 1.0f;  // 0 at the weakest channel, 1 at the strongest
+        return (uint32_t)(255.0f * (1.0f - boosted * (1.0f - norm)));
+    };
+    return channel(r) << 16 | channel(g) << 8 | channel(b);
 }
 
 static void parse_artwork(JsonObjectConst art, artwork::Request &req) {
@@ -63,6 +73,7 @@ static void parse_artwork(JsonObjectConst art, artwork::Request &req) {
     strlcpy(req.background_url, artwork::background_url(art), sizeof(req.background_url));
     req.has_accent = parse_hex_color(art["safe_colors"][0] | "", req.accent);
     req.led        = led_color(art["colors"]);
+    Serial.printf("[led] %06X\n", (unsigned)req.led);
 }
 
 static int8_t parse_tristate(JsonVariantConst v) { return v.isNull() ? -1 : (v.as<bool>() ? 1 : 0); }

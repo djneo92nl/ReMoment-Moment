@@ -17,6 +17,8 @@ static void on_gesture(lv_dir_t dir) {
     if (dir == LV_DIR_BOTTOM) nav::to_devices();
 }
 
+static void on_back(lv_event_t *) { nav::to_devices(); }
+
 static void on_slider(lv_event_t *e) {
     auto which = (settings::Value)(intptr_t)lv_event_get_user_data(e);
     settings::preview(which, lv_slider_get_value(lv_event_get_target(e)));
@@ -75,8 +77,14 @@ void build(const Layout &l) {
     lv_obj_set_style_bg_color(scr, color::bg(), 0);
     widgets::on_gesture(scr, on_gesture);
 
-    lv_obj_t *title = widgets::label(scr, "Settings", l.font_title, color::text());
-    lv_obj_set_pos(title, l.margin, l.margin / 2 + (l.btn - lv_font_get_line_height(l.font_title)) / 2);
+    // Header like the device list's: title, and the same round button to go back up a level
+    lv_obj_t *h = widgets::box(scr);
+    lv_obj_set_size(h, l.width - 2 * l.margin, l.btn);
+    lv_obj_set_pos(h, l.margin, l.margin / 2);
+    lv_obj_t *title = widgets::label(h, "Settings", l.font_title, color::text());
+    lv_obj_align(title, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_t *back = widgets::round_button(h, LV_SYMBOL_DOWN, l.btn_small, l.font_body, on_back);
+    lv_obj_align(back, LV_ALIGN_RIGHT_MID, 0, 0);
 
     lv_obj_t *body = lv_obj_create(scr);
     lv_obj_remove_style_all(body);
