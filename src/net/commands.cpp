@@ -226,7 +226,9 @@ static void load_artist(int artist_id) {
 static void load_album(int album_id) {
     if (!ensure_buffers()) return;
     JsonDocument res;
+    // With device_id, "playable" means playable on the device we'd send it to
     String path = String("/library/albums/") + album_id;
+    if (model.device()) path += "?device_id=" + String(model.device()->id);
     if (!api::ok(api::get(path.c_str(), res))) return ui::library_load_failed();
 
     ui::LibAlbum album = {};

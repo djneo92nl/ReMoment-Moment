@@ -95,12 +95,12 @@ Server support per driver (untested on hardware: ASE power-on, Mozart shuffle/re
 
 ## Phase 4 — Library
 
-> Client items marked done are **compile-tested only** and written against the agreed `/api/library/*` contract (server side in progress). Recent / Favorites / Artists tabs, artist and album views, thumbnails cached in `/remoment/thumbs/`, play album / from a track / shuffle artist on the current device.
+> Client items marked done are **compile-tested only** and written against the `/api/library/*` API (server done: DLNA first, else Spotify via the speaker's Connect device; Spotify playback untested on hardware). Recent / Favorites / Artists tabs, artist and album views, thumbnails cached in `/remoment/thumbs/`, play album / from a track / shuffle artist on the current device.
 
-- [ ] **[S] Browse API** — paginated artists → albums → tracks from the unified library, compact JSON for the client
+- [x] **[S] Browse API** — paginated artists → albums → tracks from the unified library, compact JSON for the client
 - [x] **[S] Small thumbnails** — add a ~120 px size to `ProcessArtwork` for grids
-- [ ] **[S] Recently played** endpoint from the playback history
-- [ ] **[S] Favorites** — new concept on the server (none exists yet)
+- [x] **[S] Recently played** endpoint from the playback history
+- [x] **[S] Favorites** — new concept on the server (none exists yet)
 - [x] **[C] Library screen** (swipe down) — artists → albums → tracks, recently played, favorites
 - [x] **[C] Play now** on the current device via `library/play`
 - [ ] **[C] Tap album cover** on Now Playing → open that album *(optional shortcut; needs `album_id` in the MQTT `/data` payload)*
