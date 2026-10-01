@@ -1,0 +1,206 @@
+// ES3C28P 3.5" module: 320x480 ST77922 over QSPI, custom-protocol touch at I2C 0x55.
+// Display and touch handling ported from ~/Code/MeetMicRec (src/display.c, src/touch.c),
+// LVGL glue written here (no esp_lvgl_port under Arduino).
+#if defined(BOARD_ES3C28P)
+
+#include <Arduino.h>
+#include <SD_MMC.h>
+#include <lvgl.h>
+
+#include "board.h"
+#include "driver/gpio.h"
+#include "driver/i2c_master.h"
+#include "es3c28p_panel.h"
+#include "es3c28p_pins.h"
+#include "esp_timer.h"
+
+namespace board {
+
+static const Info kInfo = {"ES3C28P 3.5\"", ES3C28P_LCD_H_RES, ES3C28P_LCD_V_RES};
+
+static const int      kBufferLines     = 40;  // partial buffers; full refresh trips the watchdog here
+static const uint32_t kTickPeriodMs    = 2;
+static const uint32_t kTaskMinDelayMs  = 5;
+static const uint32_t kTaskMaxDelayMs  = 30;
+
+static esp_lcd_panel_handle_t panel;
+static SemaphoreHandle_t      lvgl_mux;
+static lv_disp_draw_buf_t     draw_buf;
+static lv_disp_drv_t          disp_drv;
+static lv_indev_drv_t         indev_drv;
+static i2c_master_dev_handle_t touch_dev;
+
+// ---- Display --------------------------------------------------------------------
+
+static bool IRAM_ATTR on_transfer_done(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event_data_t *, void *ctx) {
+    lv_disp_flush_ready((lv_disp_drv_t *)ctx);
+    return false;
+}
+
+static void flush(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *pixels) {
+    esp_lcd_panel_draw_bitmap(panel, area->x1, area->y1, area->x2 + 1, area->y2 + 1, pixels);
+}
+
+// ST77922 quirk: flush areas must start and end on a multiple of 4 columns
+static void rounder(lv_disp_drv_t *, lv_area_t *area) {
+    area->x1 = (area->x1 >> 2) << 2;
+    area->x2 = ((area->x2 >> 2) << 2) + 3;
+}
+
+// ---- Touch: custom protocol with 16-bit registers (not FT5x06) -------------------
+
+static const uint16_t kRegMaxTouches  = 0x0009;
+static const uint16_t kRegTouchInfo   = 0x0010;
+static const uint16_t kRegTouchPoint0 = 0x0014;
+static const uint8_t  kInfoHasData    = 0x08;
+static const uint8_t  kPointValid     = 0x80;
+
+static esp_err_t touch_read(uint16_t reg, uint8_t *buf, size_t len) {
+    uint8_t addr[2] = {(uint8_t)(reg >> 8), (uint8_t)(reg & 0xFF)};
+    return i2c_master_transmit_receive(touch_dev, addr, sizeof(addr), buf, len, 50);
+}
+
+static void read_touch(lv_indev_drv_t *, lv_indev_data_t *data) {
+    static lv_coord_t last_x = 0, last_y = 0;
+    data->point.x = last_x;
+    data->point.y = last_y;
+    data->state   = LV_INDEV_STATE_REL;
+
+    // The controller's "has data" bit sticks after the first touch; TP_INT (low while
+    // touched) is the reliable press/release signal. Only read I2C while it's low.
+    if (gpio_get_level((gpio_num_t)ES3C28P_TOUCH_INT) != 0) return;
+
+    uint8_t info = 0;
+    if (touch_read(kRegTouchInfo, &info, 1) != ESP_OK || !(info & kInfoHasData)) return;
+    uint8_t p[7];
+    if (touch_read(kRegTouchPoint0, p, sizeof(p)) != ESP_OK || !(p[0] & kPointValid)) return;
+    last_x = ((p[0] & 0x3F) << 8) | p[1];
+    last_y = ((p[2] & 0x3F) << 8) | p[3];
+    data->point.x = last_x;
+    data->point.y = last_y;
+    data->state   = LV_INDEV_STATE_PR;
+}
+
+static void touch_init() {
+    gpio_config_t rst = {};
+    rst.pin_bit_mask = 1ULL << ES3C28P_TOUCH_RST;
+    rst.mode         = GPIO_MODE_OUTPUT;
+    gpio_config(&rst);
+    gpio_config_t irq = {};
+    irq.pin_bit_mask = 1ULL << ES3C28P_TOUCH_INT;
+    irq.mode         = GPIO_MODE_INPUT;
+    irq.pull_up_en   = GPIO_PULLUP_ENABLE;
+    gpio_config(&irq);
+
+    gpio_set_level((gpio_num_t)ES3C28P_TOUCH_RST, 0);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    gpio_set_level((gpio_num_t)ES3C28P_TOUCH_RST, 1);
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    i2c_master_bus_config_t bus_cfg = {};
+    bus_cfg.i2c_port          = -1;
+    bus_cfg.sda_io_num        = (gpio_num_t)ES3C28P_TOUCH_SDA;
+    bus_cfg.scl_io_num        = (gpio_num_t)ES3C28P_TOUCH_SCL;
+    bus_cfg.clk_source        = I2C_CLK_SRC_DEFAULT;
+    bus_cfg.glitch_ignore_cnt = 7;
+    bus_cfg.flags.enable_internal_pullup = true;
+    i2c_master_bus_handle_t bus;
+    ESP_ERROR_CHECK(i2c_new_master_bus(&bus_cfg, &bus));
+
+    i2c_device_config_t dev_cfg = {};
+    dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+    dev_cfg.device_address  = ES3C28P_TOUCH_ADDR;
+    dev_cfg.scl_speed_hz    = 400000;
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus, &dev_cfg, &touch_dev));
+
+    uint8_t max_touches = 0;
+    if (touch_read(kRegMaxTouches, &max_touches, 1) == ESP_OK) {
+        Serial.printf("[board] touch controller ok, %u points\n", max_touches);
+    } else {
+        Serial.println("[board] touch controller not answering yet");
+    }
+}
+
+// ---- LVGL task --------------------------------------------------------------------
+
+static void tick(void *) { lv_tick_inc(kTickPeriodMs); }
+
+static void lvgl_task(void *) {
+    for (;;) {
+        uint32_t delay_ms = kTaskMaxDelayMs;
+        if (lvgl_lock(-1)) {
+            delay_ms = lv_timer_handler();
+            lvgl_unlock();
+        }
+        delay_ms = constrain(delay_ms, kTaskMinDelayMs, kTaskMaxDelayMs);
+        vTaskDelay(pdMS_TO_TICKS(delay_ms));
+    }
+}
+
+// ---------------------------------------------------------------------------------
+
+void init() {
+    lv_init();
+
+    size_t buffer_bytes = ES3C28P_LCD_H_RES * kBufferLines * sizeof(lv_color_t);
+    panel = es3c28p_panel_init(buffer_bytes, on_transfer_done, &disp_drv);
+
+    // Two DMA-capable internal buffers: LVGL renders into one while the other is sent
+    void *buf1 = heap_caps_malloc(buffer_bytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    void *buf2 = heap_caps_malloc(buffer_bytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    assert(buf1 && buf2);
+    lv_disp_draw_buf_init(&draw_buf, buf1, buf2, ES3C28P_LCD_H_RES * kBufferLines);
+
+    lv_disp_drv_init(&disp_drv);
+    disp_drv.hor_res    = ES3C28P_LCD_H_RES;
+    disp_drv.ver_res    = ES3C28P_LCD_V_RES;
+    disp_drv.flush_cb   = flush;
+    disp_drv.rounder_cb = rounder;
+    disp_drv.draw_buf   = &draw_buf;
+    lv_disp_drv_register(&disp_drv);
+
+    touch_init();
+    lv_indev_drv_init(&indev_drv);
+    indev_drv.type    = LV_INDEV_TYPE_POINTER;
+    indev_drv.read_cb = read_touch;
+    lv_indev_drv_register(&indev_drv);
+
+    esp_timer_create_args_t tick_args = {};
+    tick_args.callback = tick;
+    tick_args.name     = "lv_tick";
+    esp_timer_handle_t tick_timer;
+    ESP_ERROR_CHECK(esp_timer_create(&tick_args, &tick_timer));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(tick_timer, kTickPeriodMs * 1000));
+
+    lvgl_mux = xSemaphoreCreateRecursiveMutex();
+    xTaskCreatePinnedToCore(lvgl_task, "lvgl", 6 * 1024, nullptr, 2, nullptr, 1);
+
+    set_backlight(100);
+}
+
+const Info &info() { return kInfo; }
+
+bool lvgl_lock(int timeout_ms) {
+    TickType_t ticks = timeout_ms < 0 ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);
+    return xSemaphoreTakeRecursive(lvgl_mux, ticks) == pdTRUE;
+}
+
+void lvgl_unlock() { xSemaphoreGiveRecursive(lvgl_mux); }
+
+void set_backlight(uint8_t percent) { analogWrite(ES3C28P_LCD_BL, min<uint8_t>(percent, 100) * 255 / 100); }
+
+float battery_voltage() {
+    // Divider ratio not yet confirmed on hardware; reads ~0 V without a battery
+    return analogReadMilliVolts(ES3C28P_BATTERY_PIN) * ES3C28P_BATTERY_DIVIDER / 1000.0f;
+}
+
+bool sd_mount() {
+    if (!SD_MMC.setPins(ES3C28P_SD_CLK, ES3C28P_SD_CMD, ES3C28P_SD_D0, ES3C28P_SD_D1, ES3C28P_SD_D2, ES3C28P_SD_D3)) {
+        return false;
+    }
+    return SD_MMC.begin("/sdcard", false /* 4-bit */, false) && SD_MMC.cardType() != CARD_NONE;
+}
+
+}  // namespace board
+
+#endif

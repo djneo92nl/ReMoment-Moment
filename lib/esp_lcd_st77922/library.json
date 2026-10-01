@@ -1,0 +1,18 @@
+{
+  "name": "esp_lcd_st77922",
+  "version": "1.0.5",
+  "description": "Espressif esp_lcd driver for the ST77922 panel (vendored from the ESP Component Registry, Apache-2.0). Used by the 3.5\" ES3C28P board.",
+  "frameworks": "*",
+  "platforms": "espressif32",
+  "build": {
+    "srcDir": ".",
+    "includeDir": "include",
+    "srcFilter": ["+<*.c>"],
+    "flags": [
+      "-Ipriv_include",
+      "-DESP_LCD_ST77922_VER_MAJOR=1",
+      "-DESP_LCD_ST77922_VER_MINOR=0",
+      "-DESP_LCD_ST77922_VER_PATCH=5"
+    ]
+  }
+}

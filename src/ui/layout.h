@@ -33,7 +33,9 @@ inline Layout make_layout() {
     l.margin    = LV_MIN(b.width, b.height) / 15;
     l.gap       = l.margin / 2;
     // Covers are rendered by the server at 320 px; don't upscale beyond that
-    l.cover      = LV_MIN(320, l.landscape ? b.height - 2 * l.margin - 120 : b.width - 2 * l.margin);
+    // Portrait: leave ~55% of the height for text, controls and the progress bar
+    l.cover      = LV_MIN(320, l.landscape ? b.height - 2 * l.margin - 120
+                                           : LV_MIN(b.width - 2 * l.margin, b.height * 45 / 100));
     l.btn_large  = large ? 96 : 64;
     l.btn        = large ? 72 : 48;
     l.btn_small  = large ? 52 : 40;
