@@ -3,7 +3,12 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
+#include <WiFi.h>
+#include <garnet_web.h>
+
 #include "api.h"
+#include "app_config.h"
+#include "board/board.h"
 #include "model.h"
 #include "player.h"
 #include "settings.h"
@@ -284,6 +289,19 @@ static void set_favorite(const Command &c) {
     if (!api::ok(status)) ui::toast(status <= 0 ? "Can't reach the server" : "Couldn't save the favorite");
 }
 
+static void load_settings_info() {
+    ui::SettingsInfo info = {};
+    strlcpy(info.board, board::info().name, sizeof(info.board));
+    snprintf(info.firmware, sizeof(info.firmware), "%s (build %d)", FIRMWARE_VERSION, BUILD_NUMBER);
+    strlcpy(info.wifi, WiFi.status() == WL_CONNECTED ? WiFi.SSID().c_str() : "Not connected", sizeof(info.wifi));
+    strlcpy(info.ip, gwNetIP().toString().c_str(), sizeof(info.ip));
+    snprintf(info.settings_url, sizeof(info.settings_url), "http://%s", info.ip);
+    strlcpy(info.password, settings::web_password_hint().c_str(), sizeof(info.password));
+    strlcpy(info.server, model.server_url[0] ? model.server_url : "Not found", sizeof(info.server));
+    snprintf(info.mqtt, sizeof(info.mqtt), "%s", model.mqtt_connected ? "Connected" : "Disconnected");
+    ui::settings_set_info(info);
+}
+
 // ---------------------------------------------------------------------------------
 
 static void run(const Command &c) {
@@ -351,6 +369,7 @@ static void run(const Command &c) {
         case Type::PlayArtist:     play_from_library(c); break;
         case Type::FavoriteAlbum:
         case Type::FavoriteArtist: set_favorite(c); break;
+        case Type::LoadSettingsInfo: load_settings_info(); break;
         case Type::Volume: break;  // handled below
     }
 }

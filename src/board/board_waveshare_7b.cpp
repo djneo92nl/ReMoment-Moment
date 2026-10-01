@@ -10,7 +10,7 @@
 
 namespace board {
 
-static const Info kInfo = {"Waveshare ESP32-S3 7B", EXAMPLE_LCD_H_RES, EXAMPLE_LCD_V_RES};
+static const Info kInfo = {"Waveshare ESP32-S3 7B", EXAMPLE_LCD_H_RES, EXAMPLE_LCD_V_RES, false, false};
 
 void init() {
     // Must run first: also brings up the shared I2C bus and the IO expander
@@ -40,6 +40,7 @@ void set_backlight(uint8_t percent) {
 }
 
 void set_led(uint32_t) {}  // no status LED on this board
+void set_led_brightness(uint8_t) {}
 
 void set_click_volume(uint8_t) {}  // no speaker
 

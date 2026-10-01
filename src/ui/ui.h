@@ -82,6 +82,25 @@ void library_load_failed();
 // screen no longer wants it (the caller then frees the image).
 bool library_thumb(uint32_t token, const lv_img_dsc_t *image);
 
+// Settings screen (swipe up from the device list): values come from settings::value(),
+// the info section from the loop task (commands::Type::LoadSettingsInfo).
+struct SettingsInfo {
+    char board[32];
+    char firmware[24];
+    char wifi[33];
+    char ip[16];
+    char settings_url[32];
+    char password[48];
+    char server[96];
+    char mqtt[24];
+};
+void settings_set_info(const SettingsInfo &info);
+
+// Nothing-playing screen: call about once a second from the loop task. Replaces Now Playing
+// while the current device isn't playing (after a short grace), and gives way to Now Playing
+// when playback starts.
+void idle_check(const Device *device);
+
 // Short message in the middle of the screen (errors, confirmations)
 void toast(const char *text);
 

@@ -23,4 +23,18 @@ void set_last_device_id(int id);
 // Set from the web UI's "Re-register" / "Find server again" buttons; main loop consumes them.
 bool take_rediscover_request();
 
+// Display and sound values, 0-100 (shared by the web UI and the device's settings screen)
+enum class Value : uint8_t { Brightness, LedBrightness, TapVolume };
+int value(Value v);
+
+// Applies a value right away; safe from any task (the device's settings screen)
+void preview(Value v, int percent);
+
+// Writes previewed values to NVS once they stopped changing; call from the loop task.
+void save_if_settled();
+
+// "Settings password: ..." — the real one only while it's still the firmware default
+// (garnet_web keeps just a salted hash once it's changed)
+String web_password_hint();
+
 }  // namespace settings

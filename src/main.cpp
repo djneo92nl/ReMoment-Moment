@@ -62,12 +62,7 @@ static void restart_flow() {
     player::device_changed();
 }
 
-// garnet_web keeps only a salted hash once the password is changed, so the actual
-// password can only be shown while it's still the firmware default
-static String web_password_hint() {
-    if (gsNamespaceExists("gw_auth")) return "Settings password: the one you set";
-    return String("Settings password: ") + WEB_DEFAULT_PASSWORD;
-}
+static String web_password_hint() { return "Settings password: " + settings::web_password_hint(); }
 
 // Logs network / setup-portal transitions (garnet_web itself is silent at our log level)
 static void log_network() {
@@ -135,6 +130,13 @@ static void step_registering() {
 static void step_running() {
     player::loop();
     commands::loop();
+    settings::save_if_settled();
+
+    static unsigned long last_idle_check_ms = 0;
+    if (millis() - last_idle_check_ms > 1000) {
+        last_idle_check_ms = millis();
+        ui::idle_check(model.device());
+    }
     registration::heartbeat_loop();
 
     unsigned long now = millis();
@@ -180,6 +182,14 @@ void setup() {
     cfg.defaultPassword = WEB_DEFAULT_PASSWORD;
     cfg.appVersion      = FIRMWARE_VERSION;
     gwBegin(cfg);
+
+    // garnet_web's Clock defaults to UTC; start this household's devices on Amsterdam time
+    // (index 2 in its zone list). Changeable in the web settings under Clock.
+    if (!gsNamespaceExists("time")) {
+        gsSetInt("time", "tz", 2);
+        setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
+        tzset();
+    }
 
     artwork::begin(model.sd_available);
     commands::begin();

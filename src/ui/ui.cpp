@@ -2,9 +2,11 @@
 
 #include "devices.h"
 #include "layout.h"
+#include "idle.h"
 #include "library.h"
 #include "nav.h"
 #include "now_playing.h"
+#include "settings_screen.h"
 #include "widgets.h"
 
 namespace ui {
@@ -83,14 +85,21 @@ void nav::to_now_playing() {
 }
 
 void nav::to_devices() {
-    lv_scr_load_anim_t anim = lv_scr_act() == devices::details_screen() ? LV_SCR_LOAD_ANIM_MOVE_RIGHT
-                                                                          : LV_SCR_LOAD_ANIM_MOVE_TOP;
+    lv_obj_t *from = lv_scr_act();
+    lv_scr_load_anim_t anim = from == devices::details_screen()  ? LV_SCR_LOAD_ANIM_MOVE_RIGHT
+                            : from == settings_screen::screen() ? LV_SCR_LOAD_ANIM_MOVE_BOTTOM
+                                                                : LV_SCR_LOAD_ANIM_MOVE_TOP;
     load(devices::list_screen(), anim);
 }
 
 void nav::to_details(int device_id) {
     devices::open_details(device_id);
     load(devices::details_screen(), LV_SCR_LOAD_ANIM_MOVE_LEFT);
+}
+
+void nav::to_settings() {
+    settings_screen::open();
+    load(settings_screen::screen(), LV_SCR_LOAD_ANIM_MOVE_TOP);
 }
 
 void nav::to_library() {
@@ -182,6 +191,31 @@ bool library_thumb(uint32_t token, const lv_img_dsc_t *image) {
     return lock && library::thumb_ready(token, image);
 }
 
+void settings_set_info(const SettingsInfo &info) {
+    LvglLock lock;
+    if (lock) settings_screen::set_info(info);
+}
+
+void idle_check(const Device *device) {
+    // Short grace so a track change or a brief state flicker doesn't bounce the screen
+    static const uint32_t kGraceMs = 3000;
+    static uint32_t inactive_since = 0;
+    LvglLock lock;
+    if (!lock) return;
+    idle::set_device(device);
+    bool playing = device && device->active();
+    uint32_t now = lv_tick_get();
+    if (playing) inactive_since = 0;
+    else if (inactive_since == 0) inactive_since = now ? now : 1;
+
+    lv_obj_t *act = lv_scr_act();
+    if (playing && act == idle::screen()) {
+        nav::to_now_playing();
+    } else if (!playing && act == now_playing::screen() && lv_tick_elaps(inactive_since) > kGraceMs) {
+        lv_scr_load_anim(idle::screen(), LV_SCR_LOAD_ANIM_FADE_ON, 600, 0, false);
+    }
+}
+
 void artwork_show(const lv_img_dsc_t *cover, bool cover_changed, const lv_img_dsc_t *background,
                   bool background_changed, bool has_accent, uint32_t accent) {
     LvglLock lock;
@@ -213,6 +247,8 @@ void init() {
     now_playing::build(layout);
     devices::build(layout);
     library::build(layout);
+    settings_screen::build(layout);
+    idle::build(layout);
 
     connection_icon = widgets::label(lv_layer_top(), "", layout.font_body, color::error());
     lv_obj_align(connection_icon, LV_ALIGN_TOP_LEFT, layout.gap, layout.gap);

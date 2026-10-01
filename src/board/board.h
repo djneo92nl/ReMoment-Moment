@@ -10,6 +10,8 @@ struct Info {
     const char *name;
     uint16_t    width;
     uint16_t    height;
+    bool        has_led;      // RGB status LED
+    bool        has_speaker;  // tap sounds
 };
 
 // Brings up I2C, touch, display, LVGL (in its own task) and the backlight.
@@ -24,8 +26,9 @@ void lvgl_unlock();
 // 0 = off, 100 = full brightness
 void set_backlight(uint8_t percent);
 
-// Status LED colour as 0xRRGGBB, 0 = off. No-op on boards without one.
+// Status LED colour as 0xRRGGBB, 0 = off, scaled by set_led_brightness(). No-op without an LED.
 void set_led(uint32_t rgb);
+void set_led_brightness(uint8_t percent);
 
 // Short UI feedback sound (taps). `volume` 0-100, 0 = off. No-op without a speaker.
 void set_click_volume(uint8_t volume);

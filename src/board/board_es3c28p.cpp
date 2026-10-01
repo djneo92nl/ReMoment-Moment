@@ -17,7 +17,7 @@
 
 namespace board {
 
-static const Info kInfo = {"ES3C28P 3.5\"", ES3C28P_LCD_H_RES, ES3C28P_LCD_V_RES};
+static const Info kInfo = {"ES3C28P 3.5\"", ES3C28P_LCD_H_RES, ES3C28P_LCD_V_RES, true, true};
 
 static const int      kBufferLines     = 40;  // partial buffers; full refresh trips the watchdog here
 static const uint32_t kTickPeriodMs    = 2;
@@ -208,12 +208,23 @@ void lvgl_unlock() { xSemaphoreGiveRecursive(lvgl_mux); }
 
 void set_backlight(uint8_t percent) { analogWrite(ES3C28P_LCD_BL, min<uint8_t>(percent, 100) * 255 / 100); }
 
+static uint32_t led_color      = 0;
+static uint8_t  led_brightness = 25;  // WS2812s are blinding at full power
+
+static void show_led() {
+    uint32_t r = (led_color >> 16) & 0xFF, g = (led_color >> 8) & 0xFF, b = led_color & 0xFF;
+    rgbLedWrite(ES3C28P_RGB_LED, r * led_brightness / 100, g * led_brightness / 100, b * led_brightness / 100);
+}
+
 void set_led(uint32_t rgb) {
-    // WS2812s are blinding at full power: a quarter is plenty for an accent glow
-    static uint32_t current = 0xFFFFFFFF;
-    if (rgb == current) return;
-    current = rgb;
-    rgbLedWrite(ES3C28P_RGB_LED, ((rgb >> 16) & 0xFF) / 4, ((rgb >> 8) & 0xFF) / 4, (rgb & 0xFF) / 4);
+    if (rgb == led_color) return;
+    led_color = rgb;
+    show_led();
+}
+
+void set_led_brightness(uint8_t percent) {
+    led_brightness = min<uint8_t>(percent, 100);
+    show_led();
 }
 
 void set_click_volume(uint8_t volume) { es3c28p_audio::set_volume(volume); }

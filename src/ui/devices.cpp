@@ -64,6 +64,7 @@ static void on_close(lv_event_t *) { nav::to_now_playing(); }
 
 static void on_list_gesture(lv_dir_t dir) {
     if (dir == LV_DIR_BOTTOM) nav::to_now_playing();
+    else if (dir == LV_DIR_TOP) nav::to_settings();
 }
 
 static lv_obj_t *header(lv_obj_t *parent, const char *title, const char *close_symbol, lv_event_cb_t on_click,

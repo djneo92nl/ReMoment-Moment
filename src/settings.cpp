@@ -3,6 +3,7 @@
 #include <Preferences.h>
 #include <garnet_settings.h>
 
+#include "app_config.h"
 #include "board/board.h"
 #include "model.h"
 
@@ -34,16 +35,71 @@ static const GsField kServerFields[] = {
              "The server will see this screen as a new client that needs approval again."),
 };
 
-// ---- Sound -----------------------------------------------------------------------
+// ---- Display and sound -------------------------------------------------------------
+// Also adjustable on the device's own settings screen (preview_*, then save_if_settled).
 
-static const char *kSoundGroup = "rm_sound";
+static const char *kDisplayGroup = "rm_display";
+static const char *kSoundGroup   = "rm_sound";
 
+static void apply_display() {
+    board::set_backlight(gsGetInt(kDisplayGroup, "bright"));
+    board::set_led_brightness(gsGetInt(kDisplayGroup, "led"));
+}
+static void on_display_changed(const GsField &) { apply_display(); }
 static void on_sound_changed(const GsField &) { board::set_click_volume(gsGetInt(kSoundGroup, "click")); }
+
+static const GsField kDisplayFields[] = {
+    gsNumber("bright", "Screen brightness", 100, 10, 100, 5, on_display_changed),
+    gsWithHelp(gsNumber("led", "LED brightness", 25, 0, 100, 5, on_display_changed),
+               "0 = off. Only on screens with a status LED."),
+};
 
 static const GsField kSoundFields[] = {
     gsWithHelp(gsNumber("click", "Tap sound volume", 50, 0, 100, 10, on_sound_changed),
                "0 = off. Only on screens with a speaker."),
 };
+
+// Values changed on the device itself: applied right away from any task, written to NVS
+// once they stop changing (dragging a slider would otherwise write on every step)
+static const unsigned long kSaveDelayMs = 1000;
+static portMUX_TYPE preview_mux = portMUX_INITIALIZER_UNLOCKED;
+static int pending[3] = {-1, -1, -1};  // Value order
+static unsigned long last_preview_ms = 0;
+
+static const char *group_of(Value v) { return v == Value::TapVolume ? kSoundGroup : kDisplayGroup; }
+static const char *key_of(Value v) {
+    switch (v) {
+        case Value::Brightness:    return "bright";
+        case Value::LedBrightness: return "led";
+        case Value::TapVolume:     return "click";
+    }
+    return "";
+}
+
+int value(Value v) { return gsGetInt(group_of(v), key_of(v)); }
+
+void preview(Value v, int percent) {
+    switch (v) {
+        case Value::Brightness:    board::set_backlight(max(percent, 10)); break;
+        case Value::LedBrightness: board::set_led_brightness(percent); break;
+        case Value::TapVolume:     board::set_click_volume(percent); break;
+    }
+    portENTER_CRITICAL(&preview_mux);
+    pending[(int)v] = percent;
+    last_preview_ms = millis();
+    portEXIT_CRITICAL(&preview_mux);
+}
+
+void save_if_settled() {
+    portENTER_CRITICAL(&preview_mux);
+    bool settled = millis() - last_preview_ms > kSaveDelayMs;
+    int values[3] = {pending[0], pending[1], pending[2]};
+    if (settled) pending[0] = pending[1] = pending[2] = -1;
+    portEXIT_CRITICAL(&preview_mux);
+    if (!settled) return;
+    for (int i = 0; i < 3; i++)
+        if (values[i] >= 0) gsSetInt(group_of((Value)i), key_of((Value)i), values[i]);
+}
 
 // ---- Status (read-only, replaces the old /status JSON endpoint) -------------
 // Info getters run on the HTTP server task: read-only access to the model only.
@@ -92,13 +148,16 @@ static const GsField kStatusFields[] = {
 };
 
 static const GsGroup kServerGroupDef = gsGroup(kServerGroup, "Server", "server", kServerFields, "ReMoment");
+static const GsGroup kDisplayGroupDef = gsGroup(kDisplayGroup, "Display", "display", kDisplayFields, "ReMoment");
 static const GsGroup kSoundGroupDef  = gsGroup(kSoundGroup, "Sound", "sound", kSoundFields, "ReMoment");
 static const GsGroup kStatusGroupDef = gsGroup("rm_status", "Status", "info", kStatusFields, "ReMoment");
 
 void register_groups() {
     gsRegister(kStatusGroupDef);
     gsRegister(kServerGroupDef);
+    gsRegister(kDisplayGroupDef);
     gsRegister(kSoundGroupDef);
+    apply_display();
     board::set_click_volume(gsGetInt(kSoundGroup, "click"));
 }
 
@@ -142,6 +201,11 @@ void set_last_device_id(int id) {
     prefs.begin(kRegNamespace, false);
     prefs.putInt("device", id);
     prefs.end();
+}
+
+String web_password_hint() {
+    if (gsNamespaceExists("gw_auth")) return "the one you set";
+    return WEB_DEFAULT_PASSWORD;
 }
 
 bool take_rediscover_request() {
