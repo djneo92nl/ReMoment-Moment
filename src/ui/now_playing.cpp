@@ -31,6 +31,8 @@ static struct {
     int8_t    shuffle = -1;
     Repeat    repeat = Repeat::Unknown;
     int8_t    liked = -1;
+    int       duration = -1;  // seconds
+    int       elapsed  = 0;   // seconds, ticks on locally while playing
 } shown;
 
 static Layout layout;
@@ -40,6 +42,9 @@ static Crossfade cover;
 static lv_obj_t *cover_box;
 static lv_obj_t *track_label;
 static lv_obj_t *artist_label;
+static lv_obj_t *album_label;
+static lv_obj_t *elapsed_label;   // landscape only
+static lv_obj_t *duration_label;  // landscape only
 static lv_obj_t *device_label;
 static lv_obj_t *notice_label;
 static lv_obj_t *progress_bar;
@@ -58,6 +63,33 @@ static lv_obj_t *volume_slider;
 static lv_obj_t *mute_btn;
 static lv_timer_t *volume_timer;
 static uint32_t last_local_volume_ms = 0;
+
+// ---- Times (landscape) -------------------------------------------------------------
+
+static void format_time(char *buf, size_t size, int seconds) {
+    snprintf(buf, size, "%d:%02d", seconds / 60, seconds % 60);
+}
+
+static void show_times() {
+    if (!elapsed_label) return;
+    if (shown.duration <= 0) {
+        lv_label_set_text(elapsed_label, "");
+        lv_label_set_text(duration_label, "");
+        return;
+    }
+    char buf[12];
+    format_time(buf, sizeof(buf), LV_MIN(shown.elapsed, shown.duration));
+    lv_label_set_text(elapsed_label, buf);
+    format_time(buf, sizeof(buf), shown.duration);
+    lv_label_set_text(duration_label, buf);
+}
+
+// /progress is a percentage (1% of a 4 minute track is 2.4 s): count seconds locally
+static void tick_elapsed(lv_timer_t *) {
+    if (shown.state != PlayState::Playing || shown.duration <= 0 || shown.elapsed >= shown.duration) return;
+    shown.elapsed++;
+    show_times();
+}
 
 // ---- Controls -------------------------------------------------------------------
 
@@ -307,6 +339,8 @@ void build(const Layout &l) {
     // Cover: a plain square placeholder, with the two artwork layers on top
     cover_box = widgets::box(scr);
     lv_obj_set_size(cover_box, l.cover, l.cover);
+    lv_obj_set_style_radius(cover_box, l.landscape ? 16 : 12, 0);
+    lv_obj_set_style_clip_corner(cover_box, true, 0);
     lv_obj_t *placeholder = widgets::box(cover_box);
     lv_obj_set_size(placeholder, lv_pct(100), lv_pct(100));
     lv_obj_set_style_bg_color(placeholder, lv_color_hex(0x1A1A1A), 0);
@@ -319,24 +353,64 @@ void build(const Layout &l) {
     }
     cover.target = l.cover;
 
-    // Text and controls: right of the cover (landscape) or below it (portrait)
+    // Text: right of the cover (landscape, like the reference design) or below it (portrait)
     lv_obj_t *info = widgets::box(scr);
     lv_obj_set_flex_flow(info, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(info, l.gap / 2, 0);
     lv_obj_set_height(info, LV_SIZE_CONTENT);
 
-    track_label = widgets::label(info, "", l.font_title, color::text());
+    // Landscape: large title, artist and album in grey below it
+    track_label = widgets::label(info, "", l.landscape ? l.font_code : l.font_title, color::text());
     lv_obj_set_width(track_label, lv_pct(100));
     lv_label_set_long_mode(track_label, LV_LABEL_LONG_WRAP);
 
-    artist_label = widgets::label(info, "", l.font_body, color::muted());
+    artist_label = widgets::label(info, "", l.landscape ? l.font_title : l.font_body, color::muted());
     lv_obj_set_width(artist_label, lv_pct(100));
     lv_label_set_long_mode(artist_label, LV_LABEL_LONG_DOT);
 
-    // Landscape: controls follow the text. Portrait: anchored above the progress bar, so a
-    // long title can't push them into it.
-    lv_obj_t *controls = info;
-    if (!l.landscape) {
+    album_label = widgets::label(info, "", l.landscape ? l.font_title : l.font_body, color::muted());
+    lv_obj_set_width(album_label, lv_pct(100));
+    lv_label_set_long_mode(album_label, LV_LABEL_LONG_DOT);
+    if (!l.landscape) lv_obj_add_flag(album_label, LV_OBJ_FLAG_HIDDEN);  // no room in portrait
+
+    // A bar, not a slider: seeking isn't planned, and a slider would swallow swipes.
+    // Landscape: in the column, with elapsed / total time below. Portrait: bottom, full width.
+    lv_obj_t *bar_parent = info;
+    if (l.landscape) {
+        lv_obj_t *spacer = widgets::box(info);  // LVGL 8 has no margins
+        lv_obj_set_size(spacer, 1, l.gap);
+    } else {
+        bar_parent = scr;
+    }
+    progress_bar = lv_bar_create(bar_parent);
+    lv_bar_set_range(progress_bar, 0, 100);
+    lv_obj_set_style_radius(progress_bar, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_radius(progress_bar, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(progress_bar, lv_color_hex(0x2A2A2A), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(progress_bar, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(progress_bar, 0, LV_PART_MAIN);
+    if (l.landscape) {
+        lv_obj_set_size(progress_bar, lv_pct(100), 10);
+        lv_obj_t *times = widgets::box(info);
+        lv_obj_set_size(times, lv_pct(100), LV_SIZE_CONTENT);
+        elapsed_label = widgets::label(times, "", l.font_body, color::muted());
+        lv_obj_align(elapsed_label, LV_ALIGN_LEFT_MID, 0, 0);
+        duration_label = widgets::label(times, "", l.font_body, color::muted());
+        lv_obj_align(duration_label, LV_ALIGN_RIGHT_MID, 0, 0);
+    } else {
+        lv_obj_set_size(progress_bar, l.width - 2 * l.margin, 8);
+        lv_obj_align(progress_bar, LV_ALIGN_BOTTOM_MID, 0, -l.margin);
+    }
+    set_accent(color::accent());
+
+    // Controls. Landscape: a bottom row (device name left, transport centred, modes right).
+    // Portrait: anchored above the progress bar, so a long title can't push them into it.
+    lv_obj_t *controls;
+    if (l.landscape) {
+        controls = widgets::box(scr);
+        lv_obj_set_size(controls, l.width - 2 * l.margin, l.btn_large);
+        lv_obj_align(controls, LV_ALIGN_BOTTOM_MID, 0, -l.margin);
+    } else {
         controls = widgets::box(scr);
         lv_obj_set_size(controls, l.width - 2 * l.margin, LV_SIZE_CONTENT);
         lv_obj_set_flex_flow(controls, LV_FLEX_FLOW_COLUMN);
@@ -345,23 +419,31 @@ void build(const Layout &l) {
     }
 
     transport_row = row(controls, l.margin);
-    if (l.landscape) lv_obj_set_style_pad_top(transport_row, l.margin, 0);
     widgets::round_button(transport_row, LV_SYMBOL_PREV, l.btn, l.font_body, on_previous);
     play_btn = widgets::round_button(transport_row, LV_SYMBOL_PLAY, l.btn_large, l.font_title, on_play);
     widgets::round_button(transport_row, LV_SYMBOL_NEXT, l.btn, l.font_body, on_next);
 
     modes_row = row(controls, l.gap);
-    lv_obj_set_style_pad_top(modes_row, l.gap, 0);
     shuffle_btn = widgets::round_button(modes_row, LV_SYMBOL_SHUFFLE, l.btn_small, l.font_small, on_shuffle);
     repeat_btn  = widgets::round_button(modes_row, LV_SYMBOL_LOOP, l.btn_small, l.font_small, on_repeat);
     like_btn    = widgets::round_button(modes_row, LV_SYMBOL_PLUS, l.btn_small, l.font_small, on_like);
 
     if (l.landscape) {
-        lv_obj_set_pos(cover_box, l.margin, l.margin);
-        lv_coord_t x = 2 * l.margin + l.cover;
-        lv_obj_set_pos(info, x, l.margin + l.gap);
-        lv_obj_set_width(info, l.width - x - l.margin);
+        lv_obj_align(transport_row, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_align(modes_row, LV_ALIGN_RIGHT_MID, 0, 0);
+        device_label = widgets::label(controls, "", l.font_title, color::muted());
+        lv_obj_set_width(device_label, (l.width - 2 * l.margin) / 2 - l.btn_large - l.btn - l.margin);
+        lv_label_set_long_mode(device_label, LV_LABEL_LONG_DOT);
+        lv_obj_align(device_label, LV_ALIGN_LEFT_MID, 0, 0);
+
+        // Cover and text centred as one group in the space above the controls
+        lv_coord_t above = l.height - l.btn_large - 2 * l.margin;
+        lv_obj_align(cover_box, LV_ALIGN_TOP_LEFT, l.margin * 2, (above - l.cover) / 2 + l.margin / 2);
+        lv_coord_t x = l.margin * 2 + l.cover + l.margin * 2;
+        lv_obj_set_width(info, l.width - x - l.margin * 2);
+        lv_obj_align_to(info, cover_box, LV_ALIGN_OUT_RIGHT_MID, l.margin * 2, 0);
     } else {
+        lv_obj_set_style_pad_top(modes_row, l.gap, 0);
         lv_obj_align(cover_box, LV_ALIGN_TOP_MID, 0, l.margin);
         lv_obj_set_width(info, l.width - 2 * l.margin);
         lv_obj_set_flex_align(info, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -369,25 +451,17 @@ void build(const Layout &l) {
         lv_label_set_long_mode(track_label, LV_LABEL_LONG_SCROLL_CIRCULAR);  // one line in portrait
         lv_obj_set_style_text_align(track_label, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_style_text_align(artist_label, LV_TEXT_ALIGN_CENTER, 0);
+        device_label = widgets::label(scr, "", l.font_small, color::muted());
+        lv_obj_align(device_label, LV_ALIGN_TOP_RIGHT, -l.gap, l.gap);
     }
 
-    device_label = widgets::label(scr, "", l.font_small, color::muted());
-    lv_obj_align(device_label, LV_ALIGN_TOP_RIGHT, -l.gap, l.gap);
-
-    // A bar, not a slider: seeking isn't planned, and a slider would swallow swipes
-    progress_bar = lv_bar_create(scr);
-    lv_obj_set_size(progress_bar, l.width - 2 * l.margin, 10);
-    lv_obj_align(progress_bar, LV_ALIGN_BOTTOM_MID, 0, -l.margin);
-    lv_bar_set_range(progress_bar, 0, 100);
-    lv_obj_set_style_bg_color(progress_bar, color::bg(), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(progress_bar, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_color(progress_bar, lv_color_hex(0x505050), LV_PART_MAIN);
-    lv_obj_set_style_border_width(progress_bar, 3, LV_PART_MAIN);
-    set_accent(color::accent());
-
     notice_label = widgets::label(scr, "", l.font_small, color::muted());
-    lv_obj_align_to(notice_label, progress_bar, LV_ALIGN_OUT_TOP_LEFT, 0, -l.gap);
+    if (l.landscape) lv_obj_align(notice_label, LV_ALIGN_TOP_RIGHT, -l.margin, l.gap);
+    else lv_obj_align_to(notice_label, progress_bar, LV_ALIGN_OUT_TOP_LEFT, 0, -l.gap);
     lv_obj_add_flag(notice_label, LV_OBJ_FLAG_HIDDEN);
+
+    // Elapsed time runs on between the server's progress updates
+    lv_timer_create(tick_elapsed, 1000, nullptr);
 
     build_volume_overlay(l);
 
@@ -416,6 +490,10 @@ void update(const Device &d, uint8_t what) {
         bool active = d.active();
         lv_label_set_text(track_label, active && d.track[0] ? d.track : "-");
         lv_label_set_text(artist_label, active ? d.artist : "");
+        lv_label_set_text(album_label, active ? d.album : "");
+        shown.duration = active ? d.duration : -1;
+        if (!active) shown.elapsed = 0;
+        show_times();
         // Dim the cover while nothing plays
         lv_obj_set_style_opa(cover_box, active ? LV_OPA_COVER : LV_OPA_50, 0);
         if (!active) lv_bar_set_value(progress_bar, 0, LV_ANIM_OFF);
@@ -424,7 +502,15 @@ void update(const Device &d, uint8_t what) {
         shown.state = d.state;
         show_play_state();
     }
-    if (what & kUpdateProgress) lv_bar_set_value(progress_bar, d.progress, LV_ANIM_ON);
+    if (what & kUpdateProgress) {
+        lv_bar_set_value(progress_bar, d.progress, LV_ANIM_ON);
+        // Resync the local clock only when it drifted further than the percentage's resolution
+        if (shown.duration > 0) {
+            int from_server = d.progress * shown.duration / 100;
+            if (abs(from_server - shown.elapsed) > shown.duration / 100 + 1) shown.elapsed = from_server;
+            show_times();
+        }
+    }
     if (what & kUpdateVolume) {
         // Don't let the server's echo fight the slider while it's being dragged
         bool recent_local = lv_tick_elaps(last_local_volume_ms) < kVolumeEchoGuardMs;

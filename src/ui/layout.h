@@ -51,7 +51,7 @@ namespace color {
 static inline lv_color_t bg() { return lv_color_hex(0x000000); }
 static inline lv_color_t text() { return lv_color_hex(0xFFFFFF); }
 static inline lv_color_t muted() { return lv_color_hex(0x808080); }
-static inline lv_color_t accent() { return lv_color_hex(0x521010); }
+static inline lv_color_t accent() { return lv_color_hex(0xE6E6E6); }  // progress without album colour
 static inline lv_color_t warning() { return lv_color_hex(0xE0A030); }
 static inline lv_color_t error() { return lv_color_hex(0xD04040); }
 }  // namespace color

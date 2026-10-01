@@ -38,6 +38,8 @@ struct Device {
     PlayState state = PlayState::Unknown;
     char      track[64]  = "";
     char      artist[64] = "";
+    char      album[64]  = "";
+    int       duration   = -1;  // seconds, -1 = unknown
     int       progress   = 0;   // 0-100
     unsigned long last_data_ms = 0;
     int       volume  = -1;     // 0-100, -1 = unknown

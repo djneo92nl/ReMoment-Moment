@@ -113,8 +113,9 @@ static void changed(int index, uint8_t what) {
 }
 
 static void clear_track(Device &d) {
-    d.track[0] = d.artist[0] = '\0';
+    d.track[0] = d.artist[0] = d.album[0] = '\0';
     d.progress = 0;
+    d.duration = -1;
 }
 
 static void on_message(char *topic, byte *payload, unsigned int length) {
@@ -154,6 +155,8 @@ static void on_message(char *topic, byte *payload, unsigned int length) {
             if (deserializeJson(doc, payload, length)) return;
             strlcpy(d.artist, doc["artist"] | "", sizeof(d.artist));
             strlcpy(d.track, doc["track"] | "", sizeof(d.track));
+            strlcpy(d.album, doc["album"] | "", sizeof(d.album));
+            d.duration = doc["duration"] | -1;
             // No artwork object yet on the first play of a new cover (the server processes it async)
             parse_artwork(doc["artwork"], device_artwork[index]);
             d.last_data_ms = millis();
@@ -215,7 +218,7 @@ static void connect() {
 void begin() {
     mqtt.setCallback(on_message);
     mqtt.setSocketTimeout(3);
-    mqtt.setBufferSize(1024);  // /data carries artwork URLs and colors
+    mqtt.setBufferSize(2048);  // /data carries artwork URLs, colours, album and long titles
 }
 
 void devices_changed() {
