@@ -14,7 +14,7 @@ static const unsigned long kPollIntervalMs      = 15000;
 static const unsigned long kHeartbeatIntervalMs = 10UL * 60 * 1000;
 
 static String        registration_token;
-static String        api_token;
+static String        token;
 static unsigned long last_attempt_ms   = 0;
 static unsigned long last_heartbeat_ms = 0;
 static bool          loaded            = false;
@@ -79,9 +79,9 @@ static Result poll_status() {
 
     if (strcmp(res["status"] | "", "approved") != 0) return Result::Pending;
 
-    api_token = res["api_token"] | "";
-    if (api_token.isEmpty()) return Result::Failed;
-    settings::set_registration(registration_token, api_token);
+    token = res["api_token"] | "";
+    if (token.isEmpty()) return Result::Failed;
+    settings::set_registration(registration_token, token);
     load_devices(res["devices"]);
     model.pairing_code[0] = '\0';
     last_heartbeat_ms = 0;
@@ -89,11 +89,11 @@ static Result poll_status() {
 }
 
 bool refresh_devices() {
-    if (api_token.isEmpty()) return false;
+    if (token.isEmpty()) return false;
     JsonDocument res;
-    int status = api::get(("/clients/" + api_token + "/devices").c_str(), res);
+    int status = api::get(("/clients/" + token + "/devices").c_str(), res);
     if (status == 404) {  // token revoked: register again
-        api_token = "";
+        token = "";
         settings::set_registration(registration_token, "");
         return false;
     }
@@ -103,7 +103,7 @@ bool refresh_devices() {
 Result step() {
     if (!loaded) {
         registration_token = settings::registration_token();
-        api_token          = settings::api_token();
+        token              = settings::api_token();
         loaded             = true;
     }
 
@@ -113,9 +113,9 @@ Result step() {
     }
     last_attempt_ms = now;
 
-    if (!api_token.isEmpty()) {
+    if (!token.isEmpty()) {
         if (refresh_devices()) return Result::Approved;
-        if (!api_token.isEmpty()) return Result::Failed;  // network error, token still valid
+        if (!token.isEmpty()) return Result::Failed;  // network error, token still valid
     }
     // Re-registering a known hardware_id is idempotent and refreshes the pairing code
     if (registration_token.isEmpty() || !model.pairing_code[0]) {
@@ -126,20 +126,22 @@ Result step() {
 }
 
 void heartbeat_loop() {
-    if (api_token.isEmpty()) return;
+    if (token.isEmpty()) return;
     unsigned long now = millis();
     if (last_heartbeat_ms != 0 && now - last_heartbeat_ms < kHeartbeatIntervalMs) return;
     last_heartbeat_ms = now;
 
     JsonDocument body, res;
     add_client_info(body);
-    api::put(("/clients/" + api_token + "/heartbeat").c_str(), body, res);
+    api::put(("/clients/" + token + "/heartbeat").c_str(), body, res);
 }
+
+String api_token() { return token; }
 
 void reset() {
     loaded             = false;
     registration_token = "";
-    api_token          = "";
+    token              = "";
     last_attempt_ms    = 0;
     last_heartbeat_ms  = 0;
     model.pairing_code[0] = '\0';

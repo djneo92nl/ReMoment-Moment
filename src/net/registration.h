@@ -2,6 +2,8 @@
 // register -> admin approves in the server UI -> api_token -> assigned devices + heartbeat.
 #pragma once
 
+#include <Arduino.h>
+
 namespace registration {
 
 enum class Result {
@@ -18,6 +20,9 @@ bool refresh_devices();
 
 // PUT heartbeat when due; call from loop().
 void heartbeat_loop();
+
+// Current api token ("" until approved)
+String api_token();
 
 // Drops all in-memory state (after "forget registration" or a server change).
 void reset();

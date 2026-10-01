@@ -7,6 +7,8 @@
 
 #include "cache.h"
 #include "model.h"
+#include "net/api.h"
+#include "net/registration.h"
 #include "ui/ui.h"
 
 namespace artwork {
@@ -110,6 +112,50 @@ static const lv_img_dsc_t *load(Kind &kind, cache::Kind cache_kind, const char *
     return &slot.dsc;
 }
 
+// ---- Pre-caching: while idle, fill the SD card from the server's artwork list ----
+// (GET /api/clients/{token}/artwork: source logos, then albums most recently played first)
+
+static const TickType_t    kIdleBeforePrecache = pdMS_TO_TICKS(30000);
+static const unsigned long kPrecacheIntervalMs = 6UL * 60 * 60 * 1000;
+
+static long          precache_cursor  = 0;   // -1 = sweep finished
+static unsigned long precache_done_ms = 0;
+
+static bool busy() { return uxQueueMessagesWaiting(queue) > 0; }
+
+// One page of the list. Returns false when there's nothing more to do for now.
+static bool precache_page() {
+    if (model.phase != Phase::Running || busy()) return false;
+    if (precache_cursor < 0) {
+        if (millis() - precache_done_ms < kPrecacheIntervalMs) return false;
+        precache_cursor = 0;  // start a new sweep
+    }
+    if (cache::nearly_full(cache::Kind::Cover)) return false;
+
+    String token = registration::api_token();
+    if (token.isEmpty()) return false;
+
+    String path = "/clients/" + token + "/artwork";
+    if (precache_cursor > 0) path += "?cursor=" + String(precache_cursor);
+    JsonDocument page;
+    if (!api::ok(api::get(path.c_str(), page))) return false;
+
+    for (JsonObjectConst item : page["data"].as<JsonArrayConst>()) {
+        if (busy()) return false;  // a track change wins; resume this page later
+        if (!cache::nearly_full(cache::Kind::Cover)) cache::fetch(cache::Kind::Cover, item["proxy_320"] | "", false);
+        if (!cache::nearly_full(cache::Kind::Background)) cache::fetch(cache::Kind::Background, item["proxy_bg"] | "", false);
+    }
+
+    if (page["next_cursor"].isNull()) {
+        precache_cursor  = -1;
+        precache_done_ms = millis();
+        Serial.println("[artwork] pre-cache sweep done");
+        return false;
+    }
+    precache_cursor = page["next_cursor"] | -1L;
+    return true;
+}
+
 static void task(void *) {
     jpeg = new JPEGDEC();
     bool cache_ok = cache::begin();
@@ -117,7 +163,11 @@ static void task(void *) {
 
     Request req;
     for (;;) {
-        if (xQueueReceive(queue, &req, portMAX_DELAY) != pdTRUE) continue;
+        if (xQueueReceive(queue, &req, cache_ok ? kIdleBeforePrecache : portMAX_DELAY) != pdTRUE) {
+            while (precache_page()) {
+            }
+            continue;
+        }
         if (!cache_ok) req.cover_url[0] = req.background_url[0] = '\0';
 
         // No cover (or still being processed on the server): show the server's placeholder logo

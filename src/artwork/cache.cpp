@@ -165,7 +165,7 @@ bool begin() {
     return true;
 }
 
-String fetch(Kind kind, const char *url) {
+String fetch(Kind kind, const char *url, bool touch) {
     if (!url || !*url) return "";
 
     Folder &fo  = folder(kind);
@@ -178,9 +178,17 @@ String fetch(Kind kind, const char *url) {
         fo.count++;
     }
 
-    write_number(String(fo.lru_dir) + "/" + hash, ++seq);
-    write_number(kSeqFile, seq);
+    if (touch) {
+        write_number(String(fo.lru_dir) + "/" + hash, ++seq);
+        write_number(kSeqFile, seq);
+    }
     return path;
+}
+
+bool nearly_full(Kind kind) {
+    const Folder &fo = folder(kind);
+    if (fo.count >= fo.max_files * 9 / 10) return true;
+    return SD_MMC.totalBytes() - SD_MMC.usedBytes() < 2 * kMinFreeBytes;
 }
 
 }  // namespace artwork::cache
