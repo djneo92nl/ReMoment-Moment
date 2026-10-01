@@ -25,7 +25,11 @@ static lv_obj_t *back_btn;
 static lv_obj_t *title_label;
 static lv_obj_t *favorite_btn;
 static lv_obj_t *tabs_row;
-static lv_obj_t *tab_btns[3];
+// Tab order on screen (the Moment puts Radio next to the playlists/collection tabs)
+static const LibView kTabViews[] = {LibView::Recent, LibView::Radio, LibView::Favorites, LibView::Artists};
+static const char *const kTabNames[] = {"Recent", "Radio", "Favorites", "Artists"};
+static const int kTabCount = 4;
+static lv_obj_t *tab_btns[kTabCount];
 static lv_obj_t *content;  // rebuilt per view
 static lv_obj_t *grid;     // album tiles / artist rows of the current view
 
@@ -191,12 +195,13 @@ static void render() {
 
     lv_coord_t top = layout.margin / 2 + layout.btn + (home ? layout.btn_small + layout.gap : layout.gap);
     lv_obj_set_pos(content, layout.margin, top);
+    lv_obj_set_style_pad_top(content, 0, 0);  // the Radio row adds its own
     lv_obj_set_size(content, layout.width - 2 * layout.margin, layout.height - top);
 
     if (home) {
         lv_label_set_text(title_label, "Library");
-        for (int i = 0; i < 3; i++) {
-            bool on = (int)tab == i;
+        for (int i = 0; i < kTabCount; i++) {
+            bool on = kTabViews[i] == tab;
             lv_obj_set_style_text_color(tab_btns[i], on ? color::text() : color::muted(), 0);
             lv_obj_set_style_border_opa(tab_btns[i], on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
         }
@@ -248,11 +253,123 @@ static void add_artist_row(const LibItem &it) {
     lv_obj_align(s, LV_ALIGN_LEFT_MID, size + layout.gap, layout.gap / 2 + 4);
 }
 
+// ---- Radio: a horizontal row of large station tiles, the centred one larger ----------
+// (after the BeoSound Moment). Sizes only change once scrolling has settled: scaling images
+// during a swipe costs too much PSRAM bandwidth on the 7" RGB panel.
+
+struct StationTile {
+    lv_obj_t  *tile, *art, *name;
+    int        thumb;  // index into thumb_slots, -1 = placeholder only
+};
+static lv_obj_t   *carousel;
+static StationTile stations[kMaxThumbs];
+static int         station_count = 0;
+static int         focused       = -1;
+
+static lv_coord_t focus_size() { return layout.cover; }
+static lv_coord_t side_size() { return layout.cover * 4 / 5; }
+
+static void size_station(StationTile &st, lv_coord_t size) {
+    lv_obj_set_size(st.art, size, size);
+    lv_obj_set_width(st.name, size);
+    if (st.thumb < 0) return;
+    ThumbSlot &slot = thumb_slots[st.thumb];
+    slot.size = size;
+    const lv_img_dsc_t *img = (const lv_img_dsc_t *)lv_img_get_src(slot.img);
+    if (img && img->header.w > 0) lv_img_set_zoom(slot.img, (uint32_t)size * LV_IMG_ZOOM_NONE / img->header.w);
+}
+
+// The tile nearest the middle of the row gets the focus size
+static void focus_centre() {
+    if (station_count == 0) return;
+    lv_area_t row;
+    lv_obj_get_coords(carousel, &row);
+    lv_coord_t mid = (row.x1 + row.x2) / 2;
+    int best = 0;
+    lv_coord_t best_dist = LV_COORD_MAX;
+    for (int i = 0; i < station_count; i++) {
+        lv_area_t a;
+        lv_obj_get_coords(stations[i].tile, &a);
+        lv_coord_t d = LV_ABS((a.x1 + a.x2) / 2 - mid);
+        if (d < best_dist) {
+            best_dist = d;
+            best      = i;
+        }
+    }
+    if (best == focused) return;
+    if (focused >= 0) size_station(stations[focused], side_size());
+    size_station(stations[best], focus_size());
+    lv_obj_set_style_text_color(stations[best].name, color::text(), 0);
+    if (focused >= 0) lv_obj_set_style_text_color(stations[focused].name, color::muted(), 0);
+    focused = best;
+}
+
+static void on_carousel_scrolled(lv_event_t *) { focus_centre(); }
+
+// Device -1 = the current device (resolved on the loop task)
+static void on_station(lv_event_t *e) {
+    commands::post(commands::Type::PlayRadio, -1, (int)(intptr_t)lv_event_get_user_data(e));
+    nav::to_now_playing();
+}
+
+static void set_stations(const LibItem *items, int count) {
+    station_count = 0;
+    focused       = -1;
+    if (count == 0) return show_message("No radio stations for this device");
+
+    carousel = lv_obj_create(content);
+    lv_obj_remove_style_all(carousel);
+    lv_obj_set_size(carousel, lv_pct(100), focus_size() + layout.margin * 3);
+    lv_obj_set_flex_flow(carousel, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(carousel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(carousel, layout.margin, 0);
+    // Room on both ends, so the first and last station can sit in the middle
+    lv_coord_t side_pad = (layout.width - 2 * layout.margin - focus_size()) / 2;
+    lv_obj_set_style_pad_hor(carousel, side_pad, 0);
+    lv_obj_set_scroll_dir(carousel, LV_DIR_HOR);
+    lv_obj_set_scroll_snap_x(carousel, LV_SCROLL_SNAP_CENTER);
+    lv_obj_set_scrollbar_mode(carousel, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_add_event_cb(carousel, on_carousel_scrolled, LV_EVENT_SCROLL_END, nullptr);
+    lv_obj_set_style_pad_top(content, layout.margin, 0);
+
+    for (int i = 0; i < count && station_count < kMaxThumbs; i++) {
+        StationTile &st = stations[station_count++];
+        st.tile = widgets::box(carousel);
+        lv_obj_add_flag(st.tile, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_size(st.tile, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(st.tile, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(st.tile, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_row(st.tile, layout.gap, 0);
+        lv_obj_set_style_opa(st.tile, LV_OPA_60, LV_STATE_PRESSED);
+        lv_obj_add_flag(st.tile, LV_OBJ_FLAG_SNAPPABLE);
+        lv_obj_add_event_cb(st.tile, on_station, LV_EVENT_CLICKED, (void *)(intptr_t)items[i].id);
+
+        int slot_before = thumb_count;
+        st.art = thumb(st.tile, side_size(), items[i].thumb, true);
+        st.thumb = thumb_count > slot_before ? slot_before : -1;
+        if (st.thumb < 0) {
+            // No artwork: a light square with a note, like the Moment's placeholder
+            lv_obj_set_style_bg_color(st.art, lv_color_hex(0xA9B6C9), 0);
+            lv_obj_center(widgets::label(st.art, LV_SYMBOL_AUDIO, layout.font_code, lv_color_hex(0x7A889C)));
+        }
+
+        st.name = widgets::label(st.tile, items[i].title, layout.font_body, color::muted());
+        lv_obj_set_width(st.name, side_size());
+        lv_label_set_long_mode(st.name, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_align(st.name, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_max_height(st.name, lv_font_get_line_height(layout.font_body) * 2, 0);
+    }
+    lv_obj_update_layout(carousel);
+    focus_centre();
+}
+
 void set_items(LibView view, const LibItem *items, int count, bool append, bool more) {
     if (current().mode != Mode::Home || view != tab) return;
     if (!append) clear_content();
     more_available = more;
     loading_more   = false;
+
+    if (view == LibView::Radio) return set_stations(items, count);
 
     if (view == LibView::Favorites) {
         int albums = 0;
@@ -419,16 +536,15 @@ void build(const Layout &l) {
     lv_obj_set_pos(tabs_row, l.margin, l.margin / 2 + l.btn);
     lv_obj_set_flex_flow(tabs_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_column(tabs_row, l.margin, 0);
-    static const char *kTabs[] = {"Recent", "Favorites", "Artists"};
-    for (int i = 0; i < 3; i++) {
-        lv_obj_t *t = widgets::label(tabs_row, kTabs[i], l.font_body, color::muted());
+    for (int i = 0; i < kTabCount; i++) {
+        lv_obj_t *t = widgets::label(tabs_row, kTabNames[i], l.font_body, color::muted());
         lv_obj_add_flag(t, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_ext_click_area(t, l.gap);
         lv_obj_set_style_border_side(t, LV_BORDER_SIDE_BOTTOM, 0);
         lv_obj_set_style_border_width(t, 2, 0);
         lv_obj_set_style_border_color(t, color::text(), 0);
         lv_obj_set_style_pad_bottom(t, 6, 0);
-        lv_obj_add_event_cb(t, on_tab, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        lv_obj_add_event_cb(t, on_tab, LV_EVENT_CLICKED, (void *)(intptr_t)kTabViews[i]);
         tab_btns[i] = t;
     }
 

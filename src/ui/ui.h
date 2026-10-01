@@ -47,14 +47,14 @@ struct Option {
 void details_set_options(int device_id, Section section, const Option *options, int count);
 
 // Library (swipe down from Now Playing). Data is loaded by commands::Type::Load*.
-enum class LibView : uint8_t { Recent, Favorites, Artists };
-enum class LibKind : uint8_t { Album, Artist };
+enum class LibView : uint8_t { Recent, Favorites, Artists, Radio };
+enum class LibKind : uint8_t { Album, Artist, Station };
 struct LibItem {
     LibKind kind;
     int     id;
     char    title[64];
     char    subtitle[64];
-    char    thumb[192];  // proxy_120 URL, "" = none
+    char    thumb[192];  // proxy_120 URL (proxy_320 for stations), "" = none
     bool    favorite;
 };
 struct LibTrack {

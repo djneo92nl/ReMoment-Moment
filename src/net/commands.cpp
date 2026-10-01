@@ -205,6 +205,23 @@ static void load_library(ui::LibView view, bool next_page) {
             n = add_items(res["artists"], n, artist_item);
             ui::library_set_items(view, items, n, false, false);
             break;
+        case ui::LibView::Radio: {
+            // Stations the current device can play (GET /devices/{id}/radio)
+            if (!model.device()) return ui::library_load_failed();
+            String path = device_path(model.device()->id, "radio");
+            if (!api::ok(api::get(path.c_str(), res))) return ui::library_load_failed();
+            for (JsonObjectConst st : res["stations"].as<JsonArrayConst>()) {
+                if (n >= kMaxItems) break;
+                ui::LibItem &it = items[n++];
+                it = {};
+                it.kind = ui::LibKind::Station;
+                it.id   = st["id"] | 0;
+                strlcpy(it.title, st["name"] | "", sizeof(it.title));
+                strlcpy(it.thumb, st["artwork"]["proxy_320"] | "", sizeof(it.thumb));
+            }
+            ui::library_set_items(view, items, n, false, false);
+            break;
+        }
         case ui::LibView::Artists: {
             if (next_page && artists_cursor.isEmpty()) return;
             String path = "/library/artists";
@@ -339,9 +356,12 @@ static void run(const Command &c) {
             break;
         }
         case Type::PlayRadio: {
+            // -1 = whatever device is current (the library's Radio tab)
+            int device_id = c.device_id >= 0 ? c.device_id : (model.device() ? model.device()->id : -1);
+            if (device_id < 0) break;
             JsonDocument body, res;
-            String path = device_path(c.device_id, "radio/") + c.value;
-            if (report(api::post(path.c_str(), body, res), c.device_id, res)) {
+            String path = device_path(device_id, "radio/") + c.value;
+            if (report(api::post(path.c_str(), body, res), device_id, res)) {
                 String msg = String("Playing ") + (res["station"] | "radio");
                 ui::toast(msg.c_str());
             }
