@@ -54,7 +54,7 @@ struct LibItem {
     int     id;
     char    title[64];
     char    subtitle[64];
-    char    thumb[192];  // proxy_120 URL (proxy_320 for stations), "" = none
+    char    thumb[192];  // proxy_120 URL, "" = none
     char    cover[192];  // proxy_320 URL, for tiles larger than 120 px
     bool    favorite;
     uint8_t shelf;       // Recent: 0 recently played, 1 favorite albums, 2 favorite artists

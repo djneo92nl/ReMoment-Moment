@@ -241,7 +241,8 @@ static void load_library(ui::LibView view, bool next_page) {
                 it.kind = ui::LibKind::Station;
                 it.id   = st["id"] | 0;
                 strlcpy(it.title, st["name"] | "", sizeof(it.title));
-                strlcpy(it.thumb, st["artwork"]["proxy_320"] | "", sizeof(it.thumb));
+                strlcpy(it.thumb, st["artwork"]["proxy_120"] | "", sizeof(it.thumb));
+                strlcpy(it.cover, st["artwork"]["proxy_320"] | "", sizeof(it.cover));
             }
             ui::library_set_items(view, items, n, false, false);
             break;
