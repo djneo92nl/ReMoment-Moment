@@ -60,7 +60,9 @@ Moves all images off flash (~4.7 MB) and downloads them as needed.
 - [x] **[C] UI tint from album colors** — progress bar, buttons and accents from `safe_colors`
 - [x] **[C] Cross-fade** between old and new cover/background on track change
 - [ ] **[C/S] Radio and source logos** when there's no album art (server provides logo URLs)
-- [ ] **[C/S] Pre-cache library covers** in the background while idle (server endpoint lists artwork URLs for this client's library)
+- [ ] **[S] Pre-render recent artwork** — scheduled job keeps the last N played albums (default 500) fully rendered (cover + background)
+- [ ] **[C/S] Pre-cache library covers** in the background while idle — server lists artwork most-recently-played first (`GET /api/clients/{token}/artwork`), client downloads missing covers and backgrounds
+- [ ] **[S] SD card export** — admin download / artisan command: zip of the last N albums in the exact SD layout (`remoment/covers/{hash}.jpg`, `remoment/backgrounds/{hash}.jpg`) to unzip onto the card
 - [x] **[C] No-SD warning** and artwork placeholders
 - [x] **[C] Remove the built-in images** from `src/ui/`
 
