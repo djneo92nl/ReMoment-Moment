@@ -60,7 +60,7 @@ static lv_obj_t *info_row(lv_obj_t *parent, const char *title) {
     lv_obj_set_style_border_color(r, lv_color_hex(0x202020), 0);
     lv_obj_t *t = widgets::label(r, title, layout.font_small, color::muted());
     lv_obj_align(t, LV_ALIGN_LEFT_MID, 0, 0);
-    lv_obj_t *v = widgets::label(r, "\xE2\x80\xA6", layout.font_small, color::text());
+    lv_obj_t *v = widgets::label(r, "...", layout.font_small, color::text());
     lv_obj_set_width(v, lv_pct(60));
     lv_label_set_long_mode(v, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_align(v, LV_TEXT_ALIGN_RIGHT, 0);

@@ -73,7 +73,7 @@ void set_device(const Device *d) {
         lv_label_set_text(device_label, "No device");
         return;
     }
-    lv_label_set_text_fmt(device_label, "%s  \xC2\xB7  %s", d->name, state_text(d->state));
+    lv_label_set_text_fmt(device_label, "%s - %s", d->name, state_text(d->state));
 }
 
 }  // namespace ui::idle

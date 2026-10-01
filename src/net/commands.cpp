@@ -164,7 +164,7 @@ static void album_item(JsonObjectConst a, ui::LibItem &it) {
     it.id   = a["id"] | 0;
     strlcpy(it.title, a["name"] | "", sizeof(it.title));
     int year = a["year"] | 0;
-    if (year > 0) snprintf(it.subtitle, sizeof(it.subtitle), "%s  \xC2\xB7  %d", (const char *)(a["artist_name"] | ""), year);
+    if (year > 0) snprintf(it.subtitle, sizeof(it.subtitle), "%s - %d", (const char *)(a["artist_name"] | ""), year);
     else strlcpy(it.subtitle, a["artist_name"] | "", sizeof(it.subtitle));
     strlcpy(it.thumb, a["artwork"]["proxy_120"] | "", sizeof(it.thumb));
     it.favorite = a["favorite"] | false;

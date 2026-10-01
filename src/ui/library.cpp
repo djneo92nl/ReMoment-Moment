@@ -205,7 +205,7 @@ static void render() {
         lv_label_set_text(title_label, "");
         commands::post(e.mode == Mode::Artist ? commands::Type::LoadArtist : commands::Type::LoadAlbum, -1, e.id);
     }
-    show_message("Loading\xE2\x80\xA6");
+    show_message("Loading...");
 }
 
 // ---- Content --------------------------------------------------------------------
@@ -327,7 +327,7 @@ void set_album(const LibAlbum &album, const LibTrack *tracks, int count) {
     lv_obj_set_style_pad_row(side, layout.gap, 0);
     thumb(side, layout.cover, album.cover, true);
     char sub[96];
-    if (album.year > 0) snprintf(sub, sizeof(sub), "%s  \xC2\xB7  %d", album.artist, album.year);
+    if (album.year > 0) snprintf(sub, sizeof(sub), "%s - %d", album.artist, album.year);
     else strlcpy(sub, album.artist, sizeof(sub));
     lv_obj_t *artist = widgets::label(side, sub, layout.font_body, color::muted());
     lv_obj_set_width(artist, layout.cover);

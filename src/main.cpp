@@ -96,7 +96,7 @@ static void step_discovering() {
     String url = settings::server_url();
     // Without mDNS the server URL has to be entered in the settings page: say where and how
     String detail = url.isEmpty() ? String("Searching the network") : url;
-    detail += "\nSettings: http://" + gwNetIP().toString() + "  \xC2\xB7  " + web_password_hint();
+    detail += "\nSettings: http://" + gwNetIP().toString() + " - " + web_password_hint();
     status("Looking for the ReMoment server", detail.c_str());
 
     unsigned long now = millis();

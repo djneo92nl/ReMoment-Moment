@@ -12,6 +12,7 @@ struct Request {
     char     background_url[192];  // artwork.proxy_bg, "" = none
     bool     has_accent;
     uint32_t accent;           // 0xRRGGBB from artwork.safe_colors[0]
+    uint32_t led;              // 0xRRGGBB for the status LED, 0 = none (from artwork.colors)
 };
 
 // Background URL for this screen from an artwork object: `proxy_bg_{w}x{h}` when the server

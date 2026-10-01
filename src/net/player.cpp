@@ -35,11 +35,34 @@ static bool parse_hex_color(const char *s, uint32_t &out) {
     return *end == '\0';
 }
 
+// The LED wants a hue, not the readable-on-black safe colours (those are lightened and look
+// white on an LED): take the most saturated raw palette colour, at full brightness.
+static uint32_t led_color(JsonArrayConst colors) {
+    uint32_t best = 0;
+    int best_sat = -1;
+    for (const char *hex : colors) {
+        uint32_t c;
+        if (!parse_hex_color(hex, c)) continue;
+        int r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
+        int mx = max(r, max(g, b)), mn = min(r, min(g, b));
+        int sat = mx == 0 ? 0 : (mx - mn) * 255 / mx;
+        if (sat > best_sat) {
+            best_sat = sat;
+            best     = c;
+        }
+    }
+    int r = (best >> 16) & 0xFF, g = (best >> 8) & 0xFF, b = best & 0xFF;
+    int mx = max(r, max(g, b));
+    if (mx == 0) return 0;
+    return (uint32_t)(r * 255 / mx) << 16 | (uint32_t)(g * 255 / mx) << 8 | (uint32_t)(b * 255 / mx);
+}
+
 static void parse_artwork(JsonObjectConst art, artwork::Request &req) {
     req = {};
     strlcpy(req.cover_url, art["proxy_320"] | "", sizeof(req.cover_url));
     strlcpy(req.background_url, artwork::background_url(art), sizeof(req.background_url));
     req.has_accent = parse_hex_color(art["safe_colors"][0] | "", req.accent);
+    req.led        = led_color(art["colors"]);
 }
 
 static int8_t parse_tristate(JsonVariantConst v) { return v.isNull() ? -1 : (v.as<bool>() ? 1 : 0); }
@@ -61,11 +84,11 @@ static PlayState parse_state(const char *s) {
     return PlayState::Unknown;
 }
 
-// Status LED: the current album's main safe colour while something plays
+// Status LED: the current album's colour while something plays
 static void update_led() {
     const Device *d = model.device();
     const artwork::Request *art = d ? &device_artwork[model.current_device] : nullptr;
-    board::set_led(d && d->active() && art->has_accent ? art->accent : 0);
+    board::set_led(d && d->active() ? art->led : 0);
 }
 
 // Pushes a device change to the screens that show it

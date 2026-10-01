@@ -394,7 +394,7 @@ void build(const Layout &l) {
     show_capabilities();
     show_play_state();
     show_modes();
-    lv_label_set_text(track_label, "—");  // em dash
+    lv_label_set_text(track_label, "-");
     lv_obj_set_style_opa(cover_box, LV_OPA_50, 0);
 }
 
@@ -414,7 +414,7 @@ void update(const Device &d, uint8_t what) {
     }
     if (what & (kUpdateTrack | kUpdateState)) {
         bool active = d.active();
-        lv_label_set_text(track_label, active && d.track[0] ? d.track : "—");
+        lv_label_set_text(track_label, active && d.track[0] ? d.track : "-");
         lv_label_set_text(artist_label, active ? d.artist : "");
         // Dim the cover while nothing plays
         lv_obj_set_style_opa(cover_box, active ? LV_OPA_COVER : LV_OPA_50, 0);

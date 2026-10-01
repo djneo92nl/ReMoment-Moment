@@ -42,7 +42,7 @@ static void fill_row(Row &r, const Device &d, bool current) {
     r.state = d.state;
     lv_label_set_text(r.name, d.name);
     if (d.active() && d.track[0]) {
-        lv_label_set_text_fmt(r.sub, "%s  \xC2\xB7  %s - %s", state_text(d.state), d.artist, d.track);
+        lv_label_set_text_fmt(r.sub, "%s - %s - %s", state_text(d.state), d.artist, d.track);
     } else {
         lv_label_set_text(r.sub, state_text(d.state));
     }
@@ -256,7 +256,7 @@ void open_details(int device_id) {
         sec.box = widgets::box(details_body);
         lv_obj_set_size(sec.box, lv_pct(100), LV_SIZE_CONTENT);
         lv_obj_set_flex_flow(sec.box, LV_FLEX_FLOW_COLUMN);
-        widgets::label(sec.box, "Loading\xE2\x80\xA6", layout.font_small, color::muted());
+        widgets::label(sec.box, "Loading...", layout.font_small, color::muted());
     }
     if (!any) widgets::label(details_body, "Nothing to set for this device", layout.font_body, color::muted());
     else commands::post(commands::Type::LoadDetails, device_id);
