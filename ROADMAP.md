@@ -36,7 +36,8 @@ Removes everything hard-coded (WiFi, broker IP, `PLAYER_ID`) and lays the ground
   - [x] Debug/status page (replaces the current `GET /status` JSON endpoint on port 80)
   - [x] OTA firmware upload — the 16 MB partition table already has two 6.25 MB app slots; firmware is ~1.3 MB once images are off flash
   - [x] *Nice to have:* SD file manager (inspect / clear the artwork cache)
-- [ ] **[S] Server discovery** — advertise the ReMoment API and MQTT broker over mDNS (e.g. `_remoment._tcp`)
+- [x] **[S] Server discovery** — `_remoment._tcp` via Avahi on the Docker host (ansible), plus `GET /api/info` for the MQTT broker; playbook not yet run
+- [x] **[S] Pairing code** — 6-character code in the register response and the admin client list
 - [x] **[C] Client registration** — `POST /clients/register` with hardware ID + firmware version, show code + "waiting for approval", poll `/clients/status/{token}`, store `apiToken`, send heartbeat
 - [x] **[C] Assigned devices** — fetch `GET /clients/{apiToken}/devices`, remember the last used device
 - [x] **[C] Startup screen** — small logo + connection steps (WiFi → server → MQTT); replaces the 1536×1024 startup image
@@ -52,8 +53,8 @@ Moves all images off flash (~4.7 MB) and downloads them as needed.
 
 - [ ] **[C] SD artwork cache** — download `artwork.proxy_320` from the `/data` payload, store it on SD keyed by the server's hash, evict the oldest when full
 - [ ] **[C] JPEG decoding** — LVGL's JPEG decoder into PSRAM; decode outside the LVGL task where possible
-- [ ] **[S] Background rendering** — extend `ProcessArtwork` with a 1024×600 background JPEG per album and add it to the `artwork` payload (e.g. `proxy_bg`)
-- [ ] **[S] Decoder-friendly JPEGs** — baseline (not progressive) JPEGs for all client sizes
+- [x] **[S] Background rendering** — extend `ProcessArtwork` with a 1024×600 background JPEG per album and add it to the `artwork` payload (`proxy_bg`, blurred and darkened cover)
+- [x] **[S] Decoder-friendly JPEGs** — baseline (not progressive) JPEGs for all client sizes
 - [ ] **[C] UI tint from album colors** — progress bar, buttons and accents from `safe_colors`
 - [ ] **[C] Cross-fade** between old and new cover/background on track change
 - [ ] **[C/S] Radio and source logos** when there's no album art (server provides logo URLs)
@@ -79,7 +80,7 @@ Moves all images off flash (~4.7 MB) and downloads them as needed.
 ## Phase 4 — Library
 
 - [ ] **[S] Browse API** — paginated artists → albums → tracks from the unified library, compact JSON for the client
-- [ ] **[S] Small thumbnails** — add a ~120 px size to `ProcessArtwork` for grids
+- [x] **[S] Small thumbnails** — add a ~120 px size to `ProcessArtwork` for grids
 - [ ] **[S] Recently played** endpoint from the playback history
 - [ ] **[S] Favorites** — new concept on the server (none exists yet)
 - [ ] **[C] Library screen** (swipe down) — artists → albums → tracks, recently played, favorites
