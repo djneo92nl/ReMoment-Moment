@@ -16,6 +16,7 @@ struct Layout {
     lv_coord_t btn;        // previous/next, header buttons
     lv_coord_t btn_small;  // shuffle/repeat/like
     lv_coord_t row;        // list row height
+    lv_coord_t tile;       // album / artist tile in grids and shelves
     bool       landscape;
     const lv_font_t *font_title;  // track name
     const lv_font_t *font_body;   // artist, status text
@@ -40,6 +41,7 @@ inline Layout make_layout() {
     l.btn        = large ? 72 : 48;
     l.btn_small  = large ? 52 : 40;
     l.row        = large ? 88 : 64;
+    l.tile       = large ? 160 : 120;  // 160 = a 320 cover decoded at half size, no runtime scaling
     l.font_title = large ? &lv_font_montserrat_32 : &lv_font_montserrat_20;
     l.font_body  = large ? &lv_font_montserrat_20 : &lv_font_montserrat_16;
     l.font_small = large ? &lv_font_montserrat_16 : &lv_font_montserrat_12;

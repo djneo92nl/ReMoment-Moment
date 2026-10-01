@@ -167,6 +167,7 @@ static void album_item(JsonObjectConst a, ui::LibItem &it) {
     if (year > 0) snprintf(it.subtitle, sizeof(it.subtitle), "%s - %d", (const char *)(a["artist_name"] | ""), year);
     else strlcpy(it.subtitle, a["artist_name"] | "", sizeof(it.subtitle));
     strlcpy(it.thumb, a["artwork"]["proxy_120"] | "", sizeof(it.thumb));
+    strlcpy(it.cover, a["artwork"]["proxy_320"] | "", sizeof(it.cover));
     it.favorite = a["favorite"] | false;
 }
 
@@ -177,14 +178,19 @@ static void artist_item(JsonObjectConst a, ui::LibItem &it) {
     int albums = a["album_count"] | 0;
     snprintf(it.subtitle, sizeof(it.subtitle), albums == 1 ? "1 album" : "%d albums", albums);
     strlcpy(it.thumb, a["artwork"]["proxy_120"] | "", sizeof(it.thumb));
+    strlcpy(it.cover, a["artwork"]["proxy_320"] | "", sizeof(it.cover));
     it.favorite = a["favorite"] | false;
 }
 
-static int add_items(JsonArrayConst list, int n, void (*fill)(JsonObjectConst, ui::LibItem &)) {
+static int add_items(JsonArrayConst list, int n, void (*fill)(JsonObjectConst, ui::LibItem &), uint8_t shelf = 0,
+                     int max = kMaxItems) {
+    int added = 0;
     for (JsonObjectConst o : list) {
-        if (n >= kMaxItems) break;
+        if (n >= kMaxItems || added >= max) break;
         items[n] = {};
-        fill(o, items[n++]);
+        fill(o, items[n]);
+        items[n++].shelf = shelf;
+        added++;
     }
     return n;
 }
@@ -194,11 +200,18 @@ static void load_library(ui::LibView view, bool next_page) {
     JsonDocument res;
     int n = 0;
     switch (view) {
-        case ui::LibView::Recent:
-            if (!api::ok(api::get("/library/recent?limit=48", res))) return ui::library_load_failed();
-            n = add_items(res["data"], 0, album_item);
+        case ui::LibView::Recent: {
+            // Shelves: recently played, then favorite albums and artists
+            if (!api::ok(api::get("/library/recent?limit=20", res))) return ui::library_load_failed();
+            n = add_items(res["data"], 0, album_item, 0, 20);
+            JsonDocument fav;
+            if (api::ok(api::get("/library/favorites", fav))) {
+                n = add_items(fav["albums"], n, album_item, 1, 20);
+                n = add_items(fav["artists"], n, artist_item, 2, 20);
+            }
             ui::library_set_items(view, items, n, false, false);
             break;
+        }
         case ui::LibView::Favorites:
             if (!api::ok(api::get("/library/favorites", res))) return ui::library_load_failed();
             n = add_items(res["albums"], 0, album_item);

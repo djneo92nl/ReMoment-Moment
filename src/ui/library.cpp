@@ -55,7 +55,7 @@ static const Entry &current() { return stack[depth - 1]; }
 // ---- Building blocks ----------------------------------------------------------------
 
 // A dark square that gets its image when the artwork task delivers it
-static lv_obj_t *thumb(lv_obj_t *parent, lv_coord_t size, const char *url, bool large = false) {
+static lv_obj_t *thumb(lv_obj_t *parent, lv_coord_t size, const char *url, bool large = false, bool half = false) {
     lv_obj_t *box = widgets::box(parent);
     lv_obj_set_size(box, size, size);
     lv_obj_set_style_bg_color(box, lv_color_hex(0x1A1A1A), 0);
@@ -67,7 +67,7 @@ static lv_obj_t *thumb(lv_obj_t *parent, lv_coord_t size, const char *url, bool 
         lv_img_set_pivot(img, 0, 0);
         int index = thumb_count++;
         thumb_slots[index] = {img, size};
-        artwork::thumb_request((uint32_t)generation << 16 | index, url, large);
+        artwork::thumb_request((uint32_t)generation << 16 | index, url, large, half);
     }
     return box;
 }
@@ -203,7 +203,6 @@ static void render() {
         for (int i = 0; i < kTabCount; i++) {
             bool on = kTabViews[i] == tab;
             lv_obj_set_style_text_color(tab_btns[i], on ? color::text() : color::muted(), 0);
-            lv_obj_set_style_border_opa(tab_btns[i], on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
         }
         commands::post(commands::Type::LoadLibrary, -1, (int)tab);
     } else {
@@ -215,22 +214,49 @@ static void render() {
 
 // ---- Content --------------------------------------------------------------------
 
-static void add_album_tile(const LibItem &it) {
-    lv_obj_t *tile = widgets::box(grid);
+// Album (or artist) tile: art with the name centred below, Moment-style. Tiles above 120 px
+// use the 320 cover decoded at half size, so nothing is scaled at draw time.
+static void add_tile(lv_obj_t *parent, const LibItem &it) {
+    lv_coord_t size = layout.tile;
+    lv_obj_t *tile = widgets::box(parent);
     lv_obj_add_flag(tile, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(tile, kThumbSize, LV_SIZE_CONTENT);
+    lv_obj_set_size(tile, size, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(tile, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(tile, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(tile, 4, 0);
     lv_obj_set_style_opa(tile, LV_OPA_60, LV_STATE_PRESSED);
-    lv_obj_add_event_cb(tile, on_album, LV_EVENT_CLICKED, (void *)(intptr_t)it.id);
+    lv_obj_add_event_cb(tile, it.kind == LibKind::Artist ? on_artist : on_album, LV_EVENT_CLICKED,
+                        (void *)(intptr_t)it.id);
 
-    thumb(tile, kThumbSize, it.thumb);
+    if (size > kThumbSize && it.cover[0]) thumb(tile, size, it.cover, true, true);
+    else thumb(tile, size, it.thumb);
     lv_obj_t *t = widgets::label(tile, it.title, layout.font_small, color::text());
-    lv_obj_set_width(t, kThumbSize);
+    lv_obj_set_width(t, size);
     lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(t, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_t *s = widgets::label(tile, it.subtitle, layout.font_small, color::muted());
-    lv_obj_set_width(s, kThumbSize);
+    lv_obj_set_width(s, size);
     lv_label_set_long_mode(s, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(s, LV_TEXT_ALIGN_CENTER, 0);
+}
+
+static void add_album_tile(const LibItem &it) { add_tile(grid, it); }
+
+// Recent: horizontal shelves of tiles, swiped sideways
+static void add_shelf(const char *title, const LibItem *items, int count, uint8_t shelf) {
+    int n = 0;
+    for (int i = 0; i < count; i++) n += items[i].shelf == shelf;
+    if (n == 0) return;
+    section_title(title);
+    lv_obj_t *row = lv_obj_create(content);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(row, layout.gap, 0);
+    lv_obj_set_scroll_dir(row, LV_DIR_HOR);
+    lv_obj_set_scrollbar_mode(row, LV_SCROLLBAR_MODE_OFF);
+    for (int i = 0; i < count; i++)
+        if (items[i].shelf == shelf) add_tile(row, items[i]);
 }
 
 static void add_artist_row(const LibItem &it) {
@@ -370,6 +396,14 @@ void set_items(LibView view, const LibItem *items, int count, bool append, bool 
     loading_more   = false;
 
     if (view == LibView::Radio) return set_stations(items, count);
+
+    if (view == LibView::Recent) {
+        if (count == 0) return show_message("Nothing played yet");
+        add_shelf("RECENTLY PLAYED", items, count, 0);
+        add_shelf("FAVORITE ALBUMS", items, count, 1);
+        add_shelf("FAVORITE ARTISTS", items, count, 2);
+        return;
+    }
 
     if (view == LibView::Favorites) {
         int albums = 0;
@@ -530,20 +564,16 @@ void build(const Layout &l) {
     favorite_btn = widgets::round_button(h, LV_SYMBOL_PLUS, l.btn_small, l.font_body, on_favorite);
     lv_obj_align(favorite_btn, LV_ALIGN_RIGHT_MID, -(l.btn_small + l.gap), 0);
 
-    // Tabs: plain words, the selected one white and underlined
+    // Tabs like the Moment's: plain words centred at the top, the selected one white
     tabs_row = widgets::box(scr);
     lv_obj_set_size(tabs_row, LV_SIZE_CONTENT, l.btn_small);
-    lv_obj_set_pos(tabs_row, l.margin, l.margin / 2 + l.btn);
+    lv_obj_align(tabs_row, LV_ALIGN_TOP_MID, 0, l.margin / 2 + l.btn);
     lv_obj_set_flex_flow(tabs_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_column(tabs_row, l.margin, 0);
     for (int i = 0; i < kTabCount; i++) {
         lv_obj_t *t = widgets::label(tabs_row, kTabNames[i], l.font_body, color::muted());
         lv_obj_add_flag(t, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_ext_click_area(t, l.gap);
-        lv_obj_set_style_border_side(t, LV_BORDER_SIDE_BOTTOM, 0);
-        lv_obj_set_style_border_width(t, 2, 0);
-        lv_obj_set_style_border_color(t, color::text(), 0);
-        lv_obj_set_style_pad_bottom(t, 6, 0);
         lv_obj_add_event_cb(t, on_tab, LV_EVENT_CLICKED, (void *)(intptr_t)kTabViews[i]);
         tab_btns[i] = t;
     }

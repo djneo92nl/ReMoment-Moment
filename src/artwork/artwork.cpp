@@ -59,7 +59,9 @@ static uint8_t *read_file(const String &path, size_t &size) {
     return data;
 }
 
-static bool decode(const String &path, Slot &slot) {
+// `half`: decode at half resolution (JPEGDEC scales while decoding), e.g. a 320 cover into a
+// 160 px tile, so the UI never has to scale images at draw time
+static bool decode(const String &path, Slot &slot, bool half = false) {
     size_t size;
     uint8_t *data = read_file(path, size);
     if (!data) return false;
@@ -67,6 +69,10 @@ static bool decode(const String &path, Slot &slot) {
     bool ok = false;
     if (jpeg->openRAM(data, size, on_draw)) {
         int w = jpeg->getWidth(), h = jpeg->getHeight();
+        if (half) {
+            w /= 2;
+            h /= 2;
+        }
         size_t needed = (size_t)w * h * 2;
         if (slot.capacity < needed) {
             free(slot.pixels);
@@ -82,7 +88,7 @@ static bool decode(const String &path, Slot &slot) {
             slot.dsc.data      = slot.pixels;
             jpeg->setPixelType(LV_COLOR_16_SWAP ? RGB565_BIG_ENDIAN : RGB565_LITTLE_ENDIAN);
             jpeg->setUserPointer(&slot.dsc);
-            ok = jpeg->decode(0, 0, 0) == 1;
+            ok = jpeg->decode(0, 0, half ? JPEG_SCALE_HALF : 0) == 1;
         }
         jpeg->close();
     }
@@ -156,7 +162,8 @@ static const int kThumbQueueLen = 48;
 
 struct ThumbRequest {
     uint32_t token;
-    bool     large;
+    bool     large;  // proxy_320 (cover cache) instead of proxy_120
+    bool     half;   // decode at half resolution
     char     url[192];
 };
 
@@ -194,7 +201,7 @@ static bool process_thumb() {
     String path = cache::fetch(r.large ? cache::Kind::Cover : cache::Kind::Thumb, r.url);
     if (path.isEmpty()) return true;
     Slot slot = {};
-    if (!decode(path, slot)) {
+    if (!decode(path, slot, r.half)) {
         free(slot.pixels);
         return true;
     }
@@ -312,9 +319,9 @@ void clear() {
     request(req);
 }
 
-bool thumb_request(uint32_t token, const char *url, bool large) {
+bool thumb_request(uint32_t token, const char *url, bool large, bool half) {
     if (!thumb_queue || !url || !*url) return false;
-    ThumbRequest r = {token, large, ""};
+    ThumbRequest r = {token, large, half, ""};
     strlcpy(r.url, url, sizeof(r.url));
     bool queued = xQueueSend(thumb_queue, &r, 0) == pdTRUE;
     xTaskNotifyGive(task_handle);
