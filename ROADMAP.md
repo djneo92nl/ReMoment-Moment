@@ -69,20 +69,29 @@ Moves all images off flash (~4.7 MB) and downloads them as needed.
 
 ## Phase 3 — Playback control and devices
 
-> Client items marked done are **compile-tested only** and written against the agreed server contract (shuffle/repeat/like/power endpoints, `GET /devices/{id}/radio`, `/modes` topic, `muted` in `/volume`, retained `/data`). Icons are LVGL's built-in symbols until the B&O reference designs arrive (like = plus/check).
+> Client items marked done are **compile-tested only** and written against the server contract (now implemented server-side) (shuffle/repeat/like/power endpoints, `GET /devices/{id}/radio`, `/modes` topic, `muted` in `/volume`, retained `/data`). Icons are LVGL's built-in symbols until the B&O reference designs arrive (like = plus/check).
 
 - [x] **[C] Transport** — play/pause, next, previous via `POST /devices/{id}/{action}`
 - [x] **[C] Volume overlay** (swipe from the side) — slider + mute via `PUT /devices/{id}/volume|mute`
 - [x] **[C] Subscribe to `state` and `volume` topics** so the play/pause and volume shown on screen come from the server
-- [ ] **[S] Shuffle, repeat, like** — new actions/endpoints; drivers report which ones they support
+- [x] **[S] Shuffle, repeat, like** — new actions/endpoints; drivers report which ones they support
 - [x] **[C] Shuffle, repeat, like buttons**, hidden when the device doesn't support them
 - [x] **[C] Device list screen** (swipe up) — assigned devices with a mini now-playing preview; tap to switch (resubscribes MQTT)
 - [x] **[C] Source switching** — `GET /devices/{id}/sources`, `POST …/sources/activate`
 - [x] **[C] Multiroom** — join/leave groups
-- [ ] **[S] Radio station list API** — stations currently only exist in the web UI (`RadioStationController`)
+- [x] **[S] Radio station list API** — stations currently only exist in the web UI (`RadioStationController`)
 - [x] **[C] Radio stations** — pick and play via `POST /devices/{id}/radio/{station}`
-- [ ] **[S] Power on / standby actions** in the API
+- [x] **[S] Power on / standby actions** in the API
 - [x] **[C] Power/standby** per device
+
+Server support per driver (untested on hardware: ASE power-on, Mozart shuffle/repeat):
+
+| Driver | shuffle | repeat | like | power |
+|---|---|---|---|---|
+| Spotify | yes | yes | yes (needs Spotify reconnect for `user-library-modify`) | no |
+| Sonos | yes | yes | no | no |
+| B&O Mozart | yes | yes | no | standby only |
+| B&O ASE | no | no | no | yes |
 
 ## Phase 4 — Library
 
