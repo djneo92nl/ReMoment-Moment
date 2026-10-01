@@ -87,7 +87,7 @@ static bool decode(const String &path, Slot &slot) {
 
 // Loads `url` into the free slot of `kind`. Returns the image to show (nullptr = placeholder)
 // and sets `changed` when the screen needs updating.
-static const lv_img_dsc_t *load(Kind &kind, const char *url, bool &changed) {
+static const lv_img_dsc_t *load(Kind &kind, cache::Kind cache_kind, const char *url, bool &changed) {
     changed = false;
     if (strcmp(url, kind.url) == 0) return kind.shown >= 0 ? &kind.slots[kind.shown].dsc : nullptr;
 
@@ -99,7 +99,7 @@ static const lv_img_dsc_t *load(Kind &kind, const char *url, bool &changed) {
     // The free slot may still be fading out on screen: take it off first
     ui::artwork_release(&slot.dsc);
 
-    String path = artwork::cache::fetch(url);
+    String path = cache::fetch(cache_kind, url);
     if (path.isEmpty() || !decode(path, slot)) {
         kind.shown  = -1;
         kind.url[0] = '\0';  // retry on the next request
@@ -111,7 +111,7 @@ static const lv_img_dsc_t *load(Kind &kind, const char *url, bool &changed) {
 
 static void task(void *) {
     jpeg = new JPEGDEC();
-    bool cache_ok = artwork::cache::begin();
+    bool cache_ok = cache::begin();
     if (!cache_ok) Serial.println("[artwork] SD cache unavailable");
 
     Request req;
@@ -120,8 +120,8 @@ static void task(void *) {
         if (!cache_ok) req.cover_url[0] = req.background_url[0] = '\0';
 
         bool cover_changed, background_changed;
-        const lv_img_dsc_t *cover      = load(covers, req.cover_url, cover_changed);
-        const lv_img_dsc_t *background = load(backgrounds, req.background_url, background_changed);
+        const lv_img_dsc_t *cover      = load(covers, cache::Kind::Cover, req.cover_url, cover_changed);
+        const lv_img_dsc_t *background = load(backgrounds, cache::Kind::Background, req.background_url, background_changed);
         ui::artwork_show(cover, cover_changed, background, background_changed, req.has_accent, req.accent);
     }
 }

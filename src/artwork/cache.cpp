@@ -8,18 +8,29 @@
 
 namespace artwork::cache {
 
-static const char *kRoot     = "/remoment/art";
-static const char *kSeqFile  = "/remoment/art/.seq";
-static const char *kUsedFile = "used";  // per entry: sequence number of the last access
+static const char *kBase    = "/remoment";
+static const char *kSeqFile = "/remoment/.lru/seq";
 
-// Evict when there are too many entries or the card is nearly full
-static const uint32_t kMaxEntries     = 3000;
-static const uint64_t kMinFreeBytes   = 64ULL * 1024 * 1024;
-static const uint32_t kEvictBatch     = 100;
-static const uint16_t kHttpTimeoutMs  = 10000;
+// Evict when a folder holds too many files or the card is nearly full
+static const uint64_t kMinFreeBytes  = 64ULL * 1024 * 1024;
+static const uint32_t kEvictBatch    = 100;
+static const uint16_t kHttpTimeoutMs = 10000;
 
-static uint32_t entry_count = 0;
-static uint32_t seq         = 0;
+struct Folder {
+    const char *dir;      // the JPEGs
+    const char *lru_dir;  // one small file per JPEG with its last-use sequence number
+    uint32_t    max_files;
+    uint32_t    count;
+};
+
+static Folder folders[] = {
+    {"/remoment/covers", "/remoment/.lru/covers", 3000, 0},
+    {"/remoment/backgrounds", "/remoment/.lru/backgrounds", 1000, 0},
+};
+
+static uint32_t seq = 0;
+
+static Folder &folder(Kind kind) { return folders[kind == Kind::Cover ? 0 : 1]; }
 
 static uint32_t read_number(const String &path) {
     File f = SD_MMC.open(path, FILE_READ);
@@ -36,36 +47,36 @@ static void write_number(const String &path, uint32_t n) {
     f.close();
 }
 
-static void remove_dir(const String &dir) {
+static bool ensure_dir(const char *dir) { return SD_MMC.exists(dir) || SD_MMC.mkdir(dir); }
+
+static uint32_t count_jpgs(const char *dir) {
+    uint32_t n = 0;
     File d = SD_MMC.open(dir);
-    if (!d) return;
+    if (!d) return 0;
     for (File f = d.openNextFile(); f; f = d.openNextFile()) {
-        String path = dir + "/" + f.name();
+        if (!f.isDirectory() && String(f.name()).endsWith(".jpg")) n++;
         f.close();
-        SD_MMC.remove(path);
     }
     d.close();
-    SD_MMC.rmdir(dir);
+    return n;
 }
 
-// Deletes the least recently used entries (lowest "used" sequence numbers)
-static void evict() {
-    struct Candidate { uint32_t used; char name[40]; };
+// Deletes the least recently used JPEGs of a folder (lowest last-use numbers)
+static void evict(Folder &fo) {
+    struct Candidate { uint32_t used; char hash[40]; };
     Candidate *oldest = (Candidate *)ps_calloc(kEvictBatch, sizeof(Candidate));
     if (!oldest) return;
     uint32_t found = 0;
 
-    File root = SD_MMC.open(kRoot);
-    for (File f = root.openNextFile(); f; f = root.openNextFile()) {
-        if (!f.isDirectory()) {
-            f.close();
-            continue;
-        }
+    File d = SD_MMC.open(fo.dir);
+    for (File f = d.openNextFile(); f; f = d.openNextFile()) {
         String name = f.name();
         f.close();
-        uint32_t used = read_number(String(kRoot) + "/" + name + "/" + kUsedFile);
+        if (!name.endsWith(".jpg")) continue;
+        String hash   = name.substring(0, name.length() - 4);
+        uint32_t used = read_number(String(fo.lru_dir) + "/" + hash);
 
-        // Keep the batch sorted ascending by `used`, newest candidate last
+        // Keep the batch sorted ascending by `used`
         if (found == kEvictBatch && used >= oldest[found - 1].used) continue;
         uint32_t i = found < kEvictBatch ? found++ : found - 1;
         while (i > 0 && oldest[i - 1].used > used) {
@@ -73,36 +84,37 @@ static void evict() {
             i--;
         }
         oldest[i].used = used;
-        strlcpy(oldest[i].name, name.c_str(), sizeof(oldest[i].name));
+        strlcpy(oldest[i].hash, hash.c_str(), sizeof(oldest[i].hash));
     }
-    root.close();
+    d.close();
 
-    for (uint32_t i = 0; i < found; i++) remove_dir(String(kRoot) + "/" + oldest[i].name);
-    entry_count = entry_count > found ? entry_count - found : 0;
-    Serial.printf("[artwork] evicted %u entries\n", found);
+    for (uint32_t i = 0; i < found; i++) {
+        SD_MMC.remove(String(fo.dir) + "/" + oldest[i].hash + ".jpg");
+        SD_MMC.remove(String(fo.lru_dir) + "/" + oldest[i].hash);
+    }
+    fo.count = fo.count > found ? fo.count - found : 0;
+    Serial.printf("[artwork] evicted %u files from %s\n", found, fo.dir);
     free(oldest);
 }
 
-static bool needs_eviction() {
-    if (entry_count > kMaxEntries) return true;
+static bool needs_eviction(const Folder &fo) {
+    if (fo.count >= fo.max_files) return true;
     return SD_MMC.totalBytes() - SD_MMC.usedBytes() < kMinFreeBytes;
 }
 
-// "http://host/storage/artwork/{hash}/320.jpg" -> hash + file. Other URLs get an FNV hash.
-static void split(const String &url, String &dir, String &file) {
-    int slash = url.lastIndexOf('/');
-    file = url.substring(slash + 1);
+// "http://host/storage/artwork/{hash}/320.jpg" -> hash. Other URLs get an FNV hash.
+static String hash_of(const String &url) {
     int marker = url.indexOf("/artwork/");
+    int slash  = url.lastIndexOf('/');
     if (marker >= 0 && marker + 9 < slash) {
-        dir = url.substring(marker + 9, slash);
-        if (dir.indexOf('/') < 0) return;
+        String hash = url.substring(marker + 9, slash);
+        if (hash.indexOf('/') < 0) return hash;
     }
     uint32_t h = 2166136261u;
     for (size_t i = 0; i < url.length(); i++) h = (h ^ (uint8_t)url[i]) * 16777619u;
     char buf[12];
     snprintf(buf, sizeof(buf), "u%08x", (unsigned)h);
-    dir = buf;
-    if (file.isEmpty()) file = "image.jpg";
+    return buf;
 }
 
 // Server URLs are built from its APP_URL, which may not be reachable from here:
@@ -143,39 +155,30 @@ static bool download(const String &url, const String &path) {
 }
 
 bool begin() {
-    if (!SD_MMC.exists("/remoment")) SD_MMC.mkdir("/remoment");
-    if (!SD_MMC.exists(kRoot) && !SD_MMC.mkdir(kRoot)) return false;
-
-    File root = SD_MMC.open(kRoot);
-    if (!root) return false;
-    for (File f = root.openNextFile(); f; f = root.openNextFile()) {
-        if (f.isDirectory()) entry_count++;
-        f.close();
+    if (!ensure_dir(kBase) || !ensure_dir("/remoment/.lru")) return false;
+    for (Folder &fo : folders) {
+        if (!ensure_dir(fo.dir) || !ensure_dir(fo.lru_dir)) return false;
+        fo.count = count_jpgs(fo.dir);
+        Serial.printf("[artwork] %s: %u files\n", fo.dir, fo.count);
     }
-    root.close();
     seq = read_number(kSeqFile);
-    Serial.printf("[artwork] cache: %u entries\n", entry_count);
     return true;
 }
 
-String fetch(const char *url) {
+String fetch(Kind kind, const char *url) {
     if (!url || !*url) return "";
 
-    String dir, file;
-    split(url, dir, file);
-    String entry = String(kRoot) + "/" + dir;
-    String path  = entry + "/" + file;
+    Folder &fo  = folder(kind);
+    String hash = hash_of(url);
+    String path = String(fo.dir) + "/" + hash + ".jpg";
 
     if (!SD_MMC.exists(path)) {
-        if (!SD_MMC.exists(entry)) {
-            if (needs_eviction()) evict();
-            if (!SD_MMC.mkdir(entry)) return "";
-            entry_count++;
-        }
+        if (needs_eviction(fo)) evict(fo);
         if (!download(resolve(url), path)) return "";
+        fo.count++;
     }
 
-    write_number(entry + "/" + kUsedFile, ++seq);
+    write_number(String(fo.lru_dir) + "/" + hash, ++seq);
     write_number(kSeqFile, seq);
     return path;
 }
