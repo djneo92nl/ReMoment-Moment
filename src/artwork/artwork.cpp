@@ -251,7 +251,7 @@ static bool precache_page() {
 
     String path = "/clients/" + token + "/artwork";
     if (precache_cursor > 0) path += "?cursor=" + String(precache_cursor);
-    JsonDocument page;
+    JsonDocument page(api::psram());  // a page stays around for minutes of downloads
     if (!api::ok(api::get(path.c_str(), page))) return false;
 
     for (JsonObjectConst item : page["data"].as<JsonArrayConst>()) {

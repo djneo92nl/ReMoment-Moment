@@ -7,6 +7,19 @@
 
 namespace api {
 
+namespace {
+struct PsramAllocator : ArduinoJson::Allocator {
+    void *allocate(size_t size) override { return heap_caps_malloc(size, MALLOC_CAP_SPIRAM); }
+    void deallocate(void *ptr) override { heap_caps_free(ptr); }
+    void *reallocate(void *ptr, size_t size) override { return heap_caps_realloc(ptr, size, MALLOC_CAP_SPIRAM); }
+};
+}  // namespace
+
+ArduinoJson::Allocator *psram() {
+    static PsramAllocator allocator;
+    return &allocator;
+}
+
 static const uint16_t kTimeoutMs = 5000;
 
 static int request(const char *method, const String &url, const JsonDocument *body, JsonDocument &response) {

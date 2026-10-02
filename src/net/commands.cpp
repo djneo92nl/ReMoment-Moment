@@ -210,14 +210,14 @@ static int add_items(JsonArrayConst list, int n, void (*fill)(JsonObjectConst, u
 static void load_library(ui::LibView view, const char *text) {
     bool next_page = strcmp(text, "more") == 0;
     if (!ensure_buffers()) return;
-    JsonDocument res;
+    JsonDocument res(api::psram());
     int n = 0;
     switch (view) {
         case ui::LibView::Recent: {
             // Shelves: recently played, then favorite albums and artists
             if (!api::ok(api::get("/library/recent?limit=20", res))) return ui::library_load_failed();
             n = add_items(res["data"], 0, album_item, 0, 20);
-            JsonDocument fav;
+            JsonDocument fav(api::psram());
             if (api::ok(api::get("/library/favorites", fav))) {
                 n = add_items(fav["albums"], n, album_item, 1, 20);
                 n = add_items(fav["artists"], n, artist_item, 2, 20);
@@ -278,7 +278,7 @@ static void load_library(ui::LibView view, const char *text) {
 
 static void load_artist(int artist_id) {
     if (!ensure_buffers()) return;
-    JsonDocument res;
+    JsonDocument res(api::psram());
     String path = String("/library/artists/") + artist_id;
     if (!api::ok(api::get(path.c_str(), res))) return ui::library_load_failed();
     int n = add_items(res["albums"], 0, album_item);
@@ -287,7 +287,7 @@ static void load_artist(int artist_id) {
 
 static void load_album(int album_id) {
     if (!ensure_buffers()) return;
-    JsonDocument res;
+    JsonDocument res(api::psram());
     // With device_id, "playable" means playable on the device we'd send it to
     String path = String("/library/albums/") + album_id;
     if (model.device()) path += "?device_id=" + String(model.device()->id);
@@ -317,7 +317,7 @@ static void load_album(int album_id) {
 
 static void load_playlist(int playlist_id) {
     if (!ensure_buffers()) return;
-    JsonDocument res;
+    JsonDocument res(api::psram());
     String path = String("/library/playlists/") + playlist_id;
     if (model.device()) path += "?device_id=" + String(model.device()->id);
     if (!api::ok(api::get(path.c_str(), res))) return ui::library_load_failed();
