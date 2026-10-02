@@ -206,7 +206,9 @@ static int add_items(JsonArrayConst list, int n, void (*fill)(JsonObjectConst, u
     return n;
 }
 
-static void load_library(ui::LibView view, bool next_page) {
+// `text`: "" = first page, "more" = next page, "letter:X" = Artists from letter X (A-Z bar)
+static void load_library(ui::LibView view, const char *text) {
+    bool next_page = strcmp(text, "more") == 0;
     if (!ensure_buffers()) return;
     JsonDocument res;
     int n = 0;
@@ -225,8 +227,8 @@ static void load_library(ui::LibView view, bool next_page) {
         }
         case ui::LibView::Favorites:
             if (!api::ok(api::get("/library/favorites", res))) return ui::library_load_failed();
-            n = add_items(res["albums"], 0, album_item);
-            n = add_items(res["artists"], n, artist_item);
+            n = add_items(res["albums"], 0, album_item, 1);  // same shelves as on Recent
+            n = add_items(res["artists"], n, artist_item, 2);
             ui::library_set_items(view, items, n, false, false);
             break;
         case ui::LibView::Radio: {
@@ -262,6 +264,8 @@ static void load_library(ui::LibView view, bool next_page) {
             if (next_page && artists_cursor.isEmpty()) return;
             String path = "/library/artists";
             if (next_page) path += "?cursor=" + artists_cursor;
+            else if (strncmp(text, "letter:", 7) == 0 && text[7])
+                path += text[7] == '#' ? String("?letter=%23") : String("?letter=") + text[7];
             if (!api::ok(api::get(path.c_str(), res))) return ui::library_load_failed();
             n = add_items(res["data"], 0, artist_item);
             JsonVariantConst next = res["next_cursor"];
@@ -451,7 +455,7 @@ static void run(const Command &c) {
                 ui::toast("Left the group");
             break;
         }
-        case Type::LoadLibrary:    load_library((ui::LibView)c.value, c.text[0] != '\0'); break;
+        case Type::LoadLibrary:    load_library((ui::LibView)c.value, c.text); break;
         case Type::LoadArtist:     load_artist(c.value); break;
         case Type::LoadAlbum:      load_album(c.value); break;
         case Type::LoadPlaylist:   load_playlist(c.value); break;

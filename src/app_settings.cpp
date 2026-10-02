@@ -41,9 +41,12 @@ static const GsField kServerFields[] = {
 static const char *kDisplayGroup = "rm_display";
 static const char *kSoundGroup   = "rm_sound";
 
+static volatile int calm_seconds = 8;  // cached: the LVGL task asks every 250 ms
+
 static void apply_display() {
     board::set_backlight(gsGetInt(kDisplayGroup, "bright"));
     board::set_led_brightness(gsGetInt(kDisplayGroup, "led"));
+    calm_seconds = gsGetInt(kDisplayGroup, "calm");
 }
 static void on_display_changed(const GsField &) { apply_display(); }
 static void on_sound_changed(const GsField &) { board::set_click_volume(gsGetInt(kSoundGroup, "click")); }
@@ -52,6 +55,9 @@ static const GsField kDisplayFields[] = {
     gsNumber("bright", "Screen brightness", 100, 10, 100, 5, on_display_changed),
     gsWithHelp(gsNumber("led", "LED brightness", 25, 0, 100, 5, on_display_changed),
                "0 = off. Only on screens with a status LED."),
+    gsWithHelp(gsNumber("calm", "Hide controls after (seconds)", 8, 0, 300, 1, on_display_changed),
+               "While playing and untouched, Now Playing hides the controls and centres the cover. "
+               "0 = never."),
 };
 
 static const GsField kSoundFields[] = {
@@ -160,6 +166,8 @@ void register_groups() {
     apply_display();
     board::set_click_volume(gsGetInt(kSoundGroup, "click"));
 }
+
+int calm_after_s() { return calm_seconds; }
 
 String server_url() { return gsGetString(kServerGroup, "url"); }
 

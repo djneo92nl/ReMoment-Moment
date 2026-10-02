@@ -104,10 +104,14 @@ static void load(Folder &fo) {
     fo.count   = 0;
     if (!fo.entries) return;
 
+    // Names only: openNextFile() opens each file, and FAT looks it up by walking the whole
+    // directory, so a scan of a few thousand covers took minutes
     File d = SD_MMC.open(fo.dir);
-    for (File f = d.openNextFile(); f && fo.count < fo.max_files + kEvictBatch; f = d.openNextFile()) {
-        String name = f.name();
-        f.close();
+    bool is_dir = false;
+    for (String path = d.getNextFileName(&is_dir); path.length() && fo.count < fo.max_files + kEvictBatch;
+         path = d.getNextFileName(&is_dir)) {
+        if (is_dir) continue;
+        String name = path.substring(path.lastIndexOf('/') + 1);
         if (!name.endsWith(".jpg") || name.length() - 4 >= sizeof(Entry::hash)) continue;
         strlcpy(fo.entries[fo.count++].hash, name.substring(0, name.length() - 4).c_str(), sizeof(Entry::hash));
     }

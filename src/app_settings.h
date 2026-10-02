@@ -33,6 +33,10 @@ void preview(Value v, int percent);
 // Writes previewed values to NVS once they stopped changing; call from the loop task.
 void save_if_settled();
 
+// Seconds without a touch before Now Playing goes calm (controls hidden), 0 = never.
+// Safe from any task.
+int calm_after_s();
+
 // "Settings password: ..." — the real one only while it's still the firmware default
 // (garnet_web keeps just a salted hash once it's changed)
 String web_password_hint();

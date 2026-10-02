@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 
+#include "app_settings.h"
 #include "nav.h"
 #include "net/commands.h"
 #include "ui.h"
@@ -13,6 +14,12 @@ static const uint32_t kCoverFadeMs       = 400;
 static const uint32_t kBackgroundFadeMs  = 700;
 static const uint32_t kVolumeHideMs      = 4000;
 static const uint32_t kVolumeEchoGuardMs = 1500;  // ignore server echoes right after a local change
+// Calm: while playing and untouched (settings::calm_after_s), the controls fade out, the bar
+// fades, the background dims and cover + text slide to the centre; the next touch brings
+// them back (that touch only wakes, the buttons are hidden)
+static const uint32_t kCalmFadeMs  = 600;
+static const lv_opa_t kCalmDim     = LV_OPA_40;  // black over the background
+static const lv_opa_t kCalmBar     = LV_OPA_40;  // progress bar and times
 
 // Two stacked images per artwork kind: `front` is visible, the other fades in on change
 struct Crossfade {
@@ -48,6 +55,11 @@ static lv_obj_t *duration_label;  // landscape only
 static lv_obj_t *device_label;
 static lv_obj_t *notice_label;
 static lv_obj_t *progress_bar;
+static lv_obj_t *controls;     // transport + modes (+ device name in landscape)
+static lv_obj_t *times_row;    // landscape only
+static lv_obj_t *dim_layer;    // black between background and content, see kCalmDim
+static lv_obj_t *info_box;     // track, artist, album (+ bar and times in landscape)
+static bool      calm = false;
 static lv_obj_t *transport_row;
 static lv_obj_t *play_btn;
 static lv_obj_t *modes_row;
@@ -328,6 +340,65 @@ static lv_obj_t *make_img(lv_obj_t *parent) {
     return img;
 }
 
+// ---- Calm ---------------------------------------------------------------------------
+
+static void set_opa(void *obj, int32_t v) { lv_obj_set_style_opa((lv_obj_t *)obj, v, 0); }
+static void set_bg_opa(void *obj, int32_t v) { lv_obj_set_style_bg_opa((lv_obj_t *)obj, v, 0); }
+static void set_translate_y(void *obj, int32_t v) { lv_obj_set_style_translate_y((lv_obj_t *)obj, v, 0); }
+
+static void animate(lv_obj_t *obj, lv_anim_exec_xcb_t exec, int32_t from, int32_t to, lv_anim_ready_cb_t ready = nullptr) {
+    if (!obj) return;
+    lv_anim_del(obj, exec);
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, obj);
+    lv_anim_set_exec_cb(&a, exec);
+    lv_anim_set_values(&a, from, to);
+    lv_anim_set_time(&a, kCalmFadeMs);
+    if (ready) lv_anim_set_ready_cb(&a, ready);
+    lv_anim_start(&a);
+}
+
+static void fade_obj(lv_obj_t *obj, lv_opa_t to, bool hide_after = false) {
+    if (!obj) return;
+    if (to > 0) lv_obj_clear_flag(obj, LV_OBJ_FLAG_HIDDEN);
+    animate(obj, set_opa, lv_obj_get_style_opa(obj, 0), to, hide_after && to == 0 ? on_faded_out : nullptr);
+}
+
+static void set_calm(bool on) {
+    if (on == calm) return;
+    calm = on;
+    fade_obj(controls, on ? LV_OPA_TRANSP : LV_OPA_COVER, true);
+    if (!layout.landscape) fade_obj(device_label, on ? LV_OPA_TRANSP : LV_OPA_COVER, true);
+    fade_obj(progress_bar, on ? kCalmBar : LV_OPA_COVER);
+    fade_obj(times_row, on ? kCalmBar : LV_OPA_COVER);
+    animate(dim_layer, set_bg_opa, lv_obj_get_style_bg_opa(dim_layer, 0), on ? kCalmDim : LV_OPA_TRANSP);
+
+    // Cover + text centred vertically in the room the controls leave: the whole height in
+    // landscape, above the progress bar in portrait
+    lv_coord_t dy = 0;
+    if (on) {
+        lv_obj_update_layout(scr);
+        lv_area_t c, i;
+        lv_obj_get_coords(cover_box, &c);
+        lv_obj_get_coords(info_box, &i);
+        lv_coord_t shift  = lv_obj_get_style_translate_y(cover_box, 0);  // mid-animation
+        lv_coord_t top    = LV_MIN(c.y1, i.y1) - shift;
+        lv_coord_t height = LV_MAX(c.y2, i.y2) - LV_MIN(c.y1, i.y1) + 1;
+        lv_coord_t bottom = layout.landscape ? layout.height : progress_bar->coords.y1 - layout.gap;
+        dy = (bottom - height) / 2 - top;
+    }
+    animate(cover_box, set_translate_y, lv_obj_get_style_translate_y(cover_box, 0), dy);
+    animate(info_box, set_translate_y, lv_obj_get_style_translate_y(info_box, 0), dy);
+}
+
+static void check_calm(lv_timer_t *) {
+    int after = settings::calm_after_s();
+    bool want = after > 0 && lv_scr_act() == scr && shown.state == PlayState::Playing &&
+                lv_disp_get_inactive_time(nullptr) >= (uint32_t)after * 1000;
+    set_calm(want);
+}
+
 // ---------------------------------------------------------------------------------
 
 static lv_obj_t *row(lv_obj_t *parent, lv_coord_t gap) {
@@ -352,6 +423,11 @@ void build(const Layout &l) {
         lv_obj_center(img);
     }
     background.target = 0;
+    dim_layer = widgets::box(scr);
+    lv_obj_set_size(dim_layer, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_bg_color(dim_layer, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(dim_layer, LV_OPA_TRANSP, 0);
+    lv_obj_clear_flag(dim_layer, LV_OBJ_FLAG_CLICKABLE);
 
     // Cover: a plain square placeholder, with the two artwork layers on top
     cover_box = widgets::box(scr);
@@ -371,7 +447,7 @@ void build(const Layout &l) {
     cover.target = l.cover;
 
     // Text: right of the cover (landscape, like the reference design) or below it (portrait)
-    lv_obj_t *info = widgets::box(scr);
+    lv_obj_t *info = info_box = widgets::box(scr);
     lv_obj_set_flex_flow(info, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(info, l.gap / 2, 0);
     lv_obj_set_height(info, LV_SIZE_CONTENT);
@@ -408,7 +484,7 @@ void build(const Layout &l) {
     lv_obj_set_style_border_width(progress_bar, 0, LV_PART_MAIN);
     if (l.landscape) {
         lv_obj_set_size(progress_bar, lv_pct(100), 10);
-        lv_obj_t *times = widgets::box(info);
+        lv_obj_t *times = times_row = widgets::box(info);
         lv_obj_set_size(times, lv_pct(100), LV_SIZE_CONTENT);
         elapsed_label = widgets::label(times, "", l.font_body, color::muted());
         lv_obj_align(elapsed_label, LV_ALIGN_LEFT_MID, 0, 0);
@@ -422,7 +498,6 @@ void build(const Layout &l) {
 
     // Controls. Landscape: a bottom row (device name left, transport centred, modes right).
     // Portrait: anchored above the progress bar, so a long title can't push them into it.
-    lv_obj_t *controls;
     if (l.landscape) {
         controls = widgets::box(scr);
         lv_obj_set_size(controls, l.width - 2 * l.margin, l.btn_large);
@@ -479,6 +554,7 @@ void build(const Layout &l) {
 
     // Elapsed time runs on between the server's progress updates
     lv_timer_create(tick_elapsed, 1000, nullptr);
+    lv_timer_create(check_calm, 250, nullptr);
 
     build_volume_overlay(l);
 

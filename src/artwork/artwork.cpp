@@ -162,6 +162,7 @@ static const int kThumbQueueLen = 48;
 
 struct ThumbRequest {
     uint32_t token;
+    bool     drop;   // free this token's buffer (the UI scrolled it far away)
     bool     large;  // proxy_320 (cover cache) instead of proxy_120
     bool     half;   // decode at half resolution
     char     url[192];
@@ -196,6 +197,15 @@ static void free_stale_thumbs() {
 static bool process_thumb() {
     ThumbRequest r;
     if (!thumb_queue || xQueueReceive(thumb_queue, &r, 0) != pdTRUE) return false;
+    if (r.drop) {
+        for (int i = 0; i < thumb_count; i++) {
+            if (thumbs[i].token != r.token) continue;
+            free(thumbs[i].pixels);
+            thumbs[i] = thumbs[--thumb_count];
+            break;
+        }
+        return true;
+    }
     if (generation_of(r.token) != thumb_generation || thumb_count >= kMaxThumbs) return true;
 
     String path = cache::fetch(r.large ? cache::Kind::Cover : cache::Kind::Thumb, r.url);
@@ -321,8 +331,16 @@ void clear() {
 
 bool thumb_request(uint32_t token, const char *url, bool large, bool half) {
     if (!thumb_queue || !url || !*url) return false;
-    ThumbRequest r = {token, large, half, ""};
+    ThumbRequest r = {token, false, large, half, ""};
     strlcpy(r.url, url, sizeof(r.url));
+    bool queued = xQueueSend(thumb_queue, &r, 0) == pdTRUE;
+    xTaskNotifyGive(task_handle);
+    return queued;
+}
+
+bool thumb_drop(uint32_t token) {
+    if (!thumb_queue) return false;
+    ThumbRequest r = {token, true, false, false, ""};
     bool queued = xQueueSend(thumb_queue, &r, 0) == pdTRUE;
     xTaskNotifyGive(task_handle);
     return queued;
