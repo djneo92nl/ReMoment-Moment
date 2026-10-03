@@ -18,6 +18,7 @@
 #include "net/registration.h"
 #include "net/server.h"
 #include "app_settings.h"
+#include "battery.h"
 #include "ui/ui.h"
 
 Model model;
@@ -162,6 +163,23 @@ static void update_connection_icon() {
     ui::set_connection(wifi, server, mqtt);
 }
 
+static void update_battery() {
+    static int last = -2;
+    const battery::State &b = battery::update();
+    model.battery_voltage   = b.volts;
+    model.battery_percent   = b.percent;
+    model.battery_usb       = b.usb;
+    model.battery_full      = b.full;
+    // Low battery on its own power: dim the screen, LED off; restored once charging or recovered
+    settings::set_low_power(b.level != battery::Level::Ok && !b.usb);
+    int state = (b.percent + 1) | b.usb << 8 | (int)b.level << 9;
+    if (state == last) return;
+    last = state;
+    Serial.printf("[battery] %.2f V, %d %%, usb %d, full %d, level %d\n", b.volts, b.percent, b.usb, b.full,
+                  (int)b.level);
+    ui::set_battery(b.level, b.percent, b.usb);
+}
+
 void setup() {
     Serial.begin(115200);
 
@@ -210,8 +228,18 @@ void loop() {
     }
     update_connection_icon();
 
+    // TEMPORARY: glitch hunt, to correlate glitches with memory / background activity
+    static unsigned long last_stats_ms = 0;
+    if (millis() - last_stats_ms > 10000) {
+        last_stats_ms = millis();
+        Serial.printf("[stats] %lus internal free %u (largest %u), dma free %u, psram free %u, rssi %d\n",
+                      millis() / 1000, (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA), (unsigned)ESP.getFreePsram(), WiFi.RSSI());
+    }
+
     if (millis() - last_battery_ms > kBatterySampleIntervalMs) {
         last_battery_ms       = millis();
-        model.battery_voltage = board::battery_voltage();
+        update_battery();
     }
 }

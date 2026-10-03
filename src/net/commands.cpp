@@ -85,6 +85,48 @@ static void post_action(int device_id, const char *action) {
     report(api::post(device_path(device_id, action).c_str(), body, res), device_id, res);
 }
 
+// ---- Volume and queue screens -------------------------------------------------------
+
+// Quiet on failure: the source line just stays hidden
+static void load_source(int device_id) {
+    JsonDocument res;
+    const char *label = "";
+    if (api::ok(api::get(device_path(device_id, "sources").c_str(), res))) {
+        for (JsonObjectConst s : res["sources"].as<JsonArrayConst>()) {
+            if (s["in_use"] | false) {
+                const char *name = s["friendly_name"] | "";
+                label            = *name ? name : (s["source_id"] | "");
+                break;
+            }
+        }
+    }
+    ui::volume_set_source(device_id, label);
+}
+
+static const int kMaxQueue = 20;
+
+static void load_queue(int device_id) {
+    static ui::QueueItem *items;
+    if (!items) items = (ui::QueueItem *)ps_calloc(kMaxQueue, sizeof(ui::QueueItem));
+    if (!items) return ui::queue_load_failed(device_id, false);
+
+    JsonDocument res(api::psram());
+    String path = device_path(device_id, "queue?limit=") + kMaxQueue;
+    int status = api::get(path.c_str(), res);
+    if (!api::ok(status)) return ui::queue_load_failed(device_id, status == 422);
+
+    int n = 0;
+    for (JsonObjectConst q : res["up_next"].as<JsonArrayConst>()) {
+        if (n >= kMaxQueue) break;
+        ui::QueueItem &it = items[n++];
+        strlcpy(it.title, q["name"] | "", sizeof(it.title));
+        strlcpy(it.artist, q["artist"] | "", sizeof(it.artist));
+        strlcpy(it.album, q["album"] | "", sizeof(it.album));
+        it.duration = q["duration"] | -1;
+    }
+    ui::queue_set_items(device_id, items, n);
+}
+
 // ---- Details screen data ---------------------------------------------------------
 
 static const int kMaxOptions = 32;
@@ -389,6 +431,14 @@ static void load_settings_info() {
     strlcpy(info.password, settings::web_password_hint().c_str(), sizeof(info.password));
     strlcpy(info.server, model.server_url[0] ? model.server_url : "Not found", sizeof(info.server));
     snprintf(info.mqtt, sizeof(info.mqtt), "%s", model.mqtt_connected ? "Connected" : "Disconnected");
+    if (board::info().has_battery) {
+        if (model.battery_percent < 0) {
+            strlcpy(info.battery, "No battery", sizeof(info.battery));
+        } else {
+            snprintf(info.battery, sizeof(info.battery), "%d %% (%.2f V)%s", model.battery_percent,
+                     model.battery_voltage, model.battery_full ? ", full" : model.battery_usb ? ", charging" : "");
+        }
+    }
     ui::settings_set_info(info);
 }
 
@@ -421,6 +471,8 @@ static void run(const Command &c) {
             break;
         }
         case Type::LoadDetails: load_details(c.device_id); break;
+        case Type::LoadSource:  load_source(c.device_id); break;
+        case Type::LoadQueue:   load_queue(c.device_id); break;
         case Type::ActivateSource: {
             JsonDocument body, res;
             body["source_id"] = c.text;

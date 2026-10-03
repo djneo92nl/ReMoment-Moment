@@ -33,6 +33,8 @@ enum class Type : uint8_t {
     LoadSettingsInfo,
     LoadPlaylist,    // value = playlist id
     PlayPlaylist,    // value = playlist id, value2 = start track id (0 = from the start)
+    LoadSource,      // active source of the device, for the volume screen
+    LoadQueue,       // upcoming tracks of the device, for the queue screen
 };
 
 struct Command {

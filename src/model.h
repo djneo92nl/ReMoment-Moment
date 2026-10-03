@@ -80,6 +80,9 @@ struct Model {
 
     bool  sd_available    = false;
     float battery_voltage = 0.0f;
+    int   battery_percent = -1;     // -1 = no battery detected
+    bool  battery_usb     = false;  // external power present
+    bool  battery_full    = false;
 
     Device *device() { return current_device >= 0 && current_device < device_count ? &devices[current_device] : nullptr; }
     const Device *device() const {

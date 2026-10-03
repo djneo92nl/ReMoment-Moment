@@ -12,6 +12,7 @@ struct Info {
     uint16_t    height;
     bool        has_led;      // RGB status LED
     bool        has_speaker;  // tap sounds
+    bool        has_battery;  // battery voltage can be measured
 };
 
 // Brings up I2C, touch, display, LVGL (in its own task) and the backlight.
@@ -35,6 +36,9 @@ void set_click_volume(uint8_t volume);
 
 // Battery voltage in volts, or 0 when the board can't measure it.
 float battery_voltage();
+
+// True while USB power is present (host or charger that enumerates). False when the board can't tell.
+bool usb_power_present();
 
 // Mounts the SD card at /sdcard. Returns false when no card is present.
 bool sd_mount();

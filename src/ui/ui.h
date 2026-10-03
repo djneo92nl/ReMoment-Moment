@@ -3,6 +3,8 @@
 // out through net/commands, never by touching the model from the LVGL task.
 #pragma once
 
+#include "battery.h"
+
 #include <lvgl.h>
 #include <stdint.h>
 
@@ -45,6 +47,20 @@ struct Option {
     bool active;
 };
 void details_set_options(int device_id, Section section, const Option *options, int count);
+
+// Volume screen (swipe right from Now Playing): the active source of a device, "" = unknown.
+void volume_set_source(int device_id, const char *label);
+
+// Queue screen (swipe left from Now Playing): upcoming tracks of a device, loaded by
+// commands::Type::LoadQueue.
+struct QueueItem {
+    char title[64];
+    char artist[48];
+    char album[48];
+    int  duration;  // seconds, -1 = unknown
+};
+void queue_set_items(int device_id, const QueueItem *items, int count);
+void queue_load_failed(int device_id, bool unsupported);
 
 // Library (swipe down from Now Playing). Data is loaded by commands::Type::Load*.
 enum class LibView : uint8_t { Recent, Favorites, Artists, Radio, Playlists };
@@ -97,6 +113,7 @@ struct SettingsInfo {
     char password[48];
     char server[96];
     char mqtt[24];
+    char battery[40];  // empty = board has no battery
 };
 void settings_set_info(const SettingsInfo &info);
 
@@ -117,5 +134,9 @@ void artwork_release(const lv_img_dsc_t *image);
 
 // Small icon in the top-left corner while something is down; hidden when all is well.
 void set_connection(bool wifi, bool server, bool mqtt);
+
+// Next to it: a plug while external power is present, and a battery glyph from 20 % down
+// (yellow, red from 10 %). Nothing when the battery is fine and unplugged.
+void set_battery(battery::Level level, int percent, bool usb);
 
 }  // namespace ui

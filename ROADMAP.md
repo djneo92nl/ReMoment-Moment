@@ -10,7 +10,7 @@ The plan for turning the "Now Playing" display into a full touch remote for ReMo
 | Hardware | 7" Waveshare (1024×600) first; 3.5" ES3C28P (320×480) as a handheld remote later — one codebase, one PlatformIO env per board |
 | Framework | Stay on Arduino (garnet_web is Arduino-only); port the 3.5" ESP-IDF drivers from `MeetMicRec` into `lib/` |
 | UI tooling | Build the UI in C++ from now on; SquareLine Studio exports in `src/ui/` are replaced screen by screen |
-| Navigation | Now Playing is home. **Swipe up** → device list. **Swipe down** → library. **Swipe in from the side** → volume overlay |
+| Navigation | Now Playing is home. **Swipe up** → device list. **Swipe down** → library. **Swipe right** → volume screen (device name, slider, mute, standby, active source). **Swipe left** → up next (queue) |
 | Button feedback | Update the screen immediately (optimistic), correct when MQTT confirms |
 | Play state | Subscribe to the `state` topic; keep the 15 s no-data timeout as a fallback |
 | Devices shown | Only devices assigned to this client on the server, in the server's sort order |
@@ -72,7 +72,7 @@ Moves all images off flash (~4.7 MB) and downloads them as needed.
 > Client items marked done are **compile-tested only** and written against the server contract (now implemented server-side) (shuffle/repeat/like/power endpoints, `GET /devices/{id}/radio`, `/modes` topic, `muted` in `/volume`, retained `/data`). Icons are LVGL's built-in symbols until the B&O reference designs arrive (like = plus/check).
 
 - [x] **[C] Transport** — play/pause, next, previous via `POST /devices/{id}/{action}`
-- [x] **[C] Volume overlay** (swipe from the side) — slider + mute via `PUT /devices/{id}/volume|mute`
+- [x] **[C] Volume screen** (swipe right) — slider + mute via `PUT /devices/{id}/volume|mute`
 - [x] **[C] Subscribe to `state` and `volume` topics** so the play/pause and volume shown on screen come from the server
 - [x] **[S] Shuffle, repeat, like** — new actions/endpoints; drivers report which ones they support
 - [x] **[C] Shuffle, repeat, like buttons**, hidden when the device doesn't support them
@@ -129,7 +129,7 @@ Board: ES3C28P (ST77922 320×480 QSPI panel, custom-protocol touch at I2C `0x55`
 
 - [ ] Search (on-screen keyboard)
 - [ ] Playlists
-- [ ] Queue view (`GET /devices/{id}/queue`)
+- [x] Queue view (text only, no artwork yet) (`GET /devices/{id}/queue`)
 - [ ] Video device support
 
 ## Dropped

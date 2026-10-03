@@ -1,4 +1,4 @@
-// Now Playing screen and its volume overlay. Internal to the UI layer: callers hold the LVGL lock.
+// Now Playing screen. Internal to the UI layer: callers hold the LVGL lock.
 #pragma once
 
 #include <lvgl.h>

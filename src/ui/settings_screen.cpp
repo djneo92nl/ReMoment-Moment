@@ -11,7 +11,7 @@ namespace ui::settings_screen {
 static Layout layout;
 static lv_obj_t *scr;
 static lv_obj_t *sliders[3];  // settings::Value order; nullptr when the board lacks it
-static lv_obj_t *info_values[8];
+static lv_obj_t *info_values[9];
 
 static void on_gesture(lv_dir_t dir) {
     if (dir == LV_DIR_BOTTOM) nav::to_devices();
@@ -111,8 +111,9 @@ void build(const Layout &l) {
 
     section(body, "INFO");
     static const char *kInfo[] = {"Screen", "Firmware", "WiFi", "IP address", "Settings page", "Settings password",
-                                  "Server", "MQTT"};
-    for (int i = 0; i < 8; i++) info_values[i] = info_row(body, kInfo[i]);
+                                  "Server", "MQTT", "Battery"};
+    int rows = b.has_battery ? 9 : 8;
+    for (int i = 0; i < rows; i++) info_values[i] = info_row(body, kInfo[i]);
 }
 
 lv_obj_t *screen() { return scr; }
@@ -126,8 +127,9 @@ void open() {
 
 void set_info(const SettingsInfo &info) {
     const char *values[] = {info.board, info.firmware, info.wifi,   info.ip,
-                            info.settings_url, info.password, info.server, info.mqtt};
-    for (int i = 0; i < 8; i++) lv_label_set_text(info_values[i], values[i]);
+                            info.settings_url, info.password, info.server, info.mqtt, info.battery};
+    for (int i = 0; i < 9; i++)
+        if (info_values[i]) lv_label_set_text(info_values[i], values[i]);
 }
 
 }  // namespace ui::settings_screen

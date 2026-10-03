@@ -12,8 +12,6 @@ namespace ui::now_playing {
 
 static const uint32_t kCoverFadeMs       = 400;
 static const uint32_t kBackgroundFadeMs  = 700;
-static const uint32_t kVolumeHideMs      = 4000;
-static const uint32_t kVolumeEchoGuardMs = 1500;  // ignore server echoes right after a local change
 // Calm: while playing and untouched (settings::calm_after_s), the controls fade out, the bar
 // fades, the background dims and cover + text slide to the centre; the next touch brings
 // them back (that touch only wakes, the buttons are hidden)
@@ -33,8 +31,6 @@ static struct {
     int       id = -1;
     uint16_t  caps = 0;
     PlayState state = PlayState::Unknown;
-    int       volume = -1;
-    bool      muted = false;
     int8_t    shuffle = -1;
     Repeat    repeat = Repeat::Unknown;
     int8_t    liked = -1;
@@ -66,15 +62,6 @@ static lv_obj_t *modes_row;
 static lv_obj_t *shuffle_btn;
 static lv_obj_t *repeat_btn;
 static lv_obj_t *like_btn;
-
-// Volume overlay (top layer)
-static lv_obj_t *volume_backdrop;
-static lv_obj_t *volume_panel;
-static lv_obj_t *volume_label;
-static lv_obj_t *volume_slider;
-static lv_obj_t *mute_btn;
-static lv_timer_t *volume_timer;
-static uint32_t last_local_volume_ms = 0;
 
 // ---- Times (landscape) -------------------------------------------------------------
 
@@ -191,103 +178,15 @@ static void show_capabilities() {
     set_visible(modes_row, shuffle || repeat || like);
 }
 
-// ---- Volume overlay ---------------------------------------------------------------
-
-static void show_volume() {
-    lv_label_set_text_fmt(volume_label, shown.volume >= 0 ? "%d" : "-", shown.volume);
-    if (shown.volume >= 0) lv_slider_set_value(volume_slider, shown.volume, LV_ANIM_OFF);
-    widgets::set_symbol(mute_btn, shown.muted ? LV_SYMBOL_MUTE : LV_SYMBOL_VOLUME_MAX);
-    widgets::set_active(mute_btn, shown.muted);
-}
-
-static void close_volume(lv_timer_t * = nullptr) {
-    lv_obj_add_flag(volume_backdrop, LV_OBJ_FLAG_HIDDEN);
-    lv_timer_pause(volume_timer);
-}
-
-static void keep_volume_open() {
-    lv_timer_reset(volume_timer);
-    lv_timer_resume(volume_timer);
-}
-
-static void open_volume() {
-    if (!(shown.caps & kCapVolume)) return;
-    show_volume();
-    lv_obj_clear_flag(volume_backdrop, LV_OBJ_FLAG_HIDDEN);
-    keep_volume_open();
-}
-
-static void on_volume_changed(lv_event_t *) {
-    shown.volume = lv_slider_get_value(volume_slider);
-    lv_label_set_text_fmt(volume_label, "%d", shown.volume);
-    last_local_volume_ms = lv_tick_get();
-    commands::post(commands::Type::Volume, shown.id, shown.volume);
-    keep_volume_open();
-}
-
-static void on_mute(lv_event_t *) {
-    shown.muted = !shown.muted;
-    last_local_volume_ms = lv_tick_get();
-    commands::post(commands::Type::Mute, shown.id, shown.muted);
-    show_volume();
-    keep_volume_open();
-}
-
-static void on_backdrop(lv_event_t *e) {
-    if (lv_event_get_target(e) == volume_backdrop) close_volume();
-}
-
-static void build_volume_overlay(const Layout &l) {
-    volume_backdrop = lv_obj_create(lv_layer_top());
-    lv_obj_remove_style_all(volume_backdrop);
-    lv_obj_set_size(volume_backdrop, l.width, l.height);
-    lv_obj_add_flag(volume_backdrop, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(volume_backdrop, on_backdrop, LV_EVENT_CLICKED, nullptr);
-    lv_obj_add_flag(volume_backdrop, LV_OBJ_FLAG_HIDDEN);
-
-    volume_panel = lv_obj_create(volume_backdrop);
-    lv_obj_remove_style_all(volume_panel);
-    lv_obj_clear_flag(volume_panel, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_size(volume_panel, l.btn * 2, l.height - 2 * l.margin);
-    lv_obj_align(volume_panel, LV_ALIGN_RIGHT_MID, -l.margin, 0);
-    lv_obj_set_style_radius(volume_panel, l.btn, 0);
-    lv_obj_set_style_bg_color(volume_panel, lv_color_hex(0x101010), 0);
-    lv_obj_set_style_bg_opa(volume_panel, LV_OPA_90, 0);
-    lv_obj_set_style_border_width(volume_panel, 1, 0);
-    lv_obj_set_style_border_color(volume_panel, lv_color_hex(0x303030), 0);
-    lv_obj_set_style_pad_ver(volume_panel, l.margin, 0);
-    lv_obj_set_flex_flow(volume_panel, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(volume_panel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(volume_panel, l.margin, 0);
-
-    volume_label = widgets::label(volume_panel, "-", l.font_title, color::text());
-
-    volume_slider = lv_slider_create(volume_panel);
-    lv_obj_set_width(volume_slider, 12);
-    lv_obj_set_flex_grow(volume_slider, 1);
-    lv_slider_set_range(volume_slider, 0, 100);
-    lv_obj_set_style_bg_color(volume_slider, lv_color_hex(0x303030), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(volume_slider, color::text(), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(volume_slider, color::text(), LV_PART_KNOB);
-    lv_obj_set_style_pad_all(volume_slider, 6, LV_PART_KNOB);
-    lv_obj_set_ext_click_area(volume_slider, l.btn / 2);
-    lv_obj_add_event_cb(volume_slider, on_volume_changed, LV_EVENT_VALUE_CHANGED, nullptr);
-
-    mute_btn = widgets::round_button(volume_panel, LV_SYMBOL_VOLUME_MAX, l.btn, l.font_body, on_mute);
-
-    volume_timer = lv_timer_create(close_volume, kVolumeHideMs, nullptr);
-    lv_timer_set_repeat_count(volume_timer, -1);
-    lv_timer_pause(volume_timer);
-}
-
-// ---- Gestures: swipe up = devices, swipe down = library, side = volume ---------
+// ---- Gestures: swipe up = devices, swipe down = library, swipe right = volume,
+// swipe left = queue ---------
 
 static void on_gesture(lv_dir_t dir) {
     switch (dir) {
         case LV_DIR_TOP:    nav::to_devices(); break;
         case LV_DIR_BOTTOM: nav::to_library(); break;
-        case LV_DIR_LEFT:
-        case LV_DIR_RIGHT:  open_volume(); break;
+        case LV_DIR_RIGHT:  nav::to_volume(); break;
+        case LV_DIR_LEFT:   nav::to_queue(); break;
         default: break;
     }
 }
@@ -556,8 +455,6 @@ void build(const Layout &l) {
     lv_timer_create(tick_elapsed, 1000, nullptr);
     lv_timer_create(check_calm, 250, nullptr);
 
-    build_volume_overlay(l);
-
     show_capabilities();
     show_play_state();
     show_modes();
@@ -571,7 +468,6 @@ void update(const Device &d, uint8_t what) {
     if (d.id != shown.id) {
         shown.id = d.id;
         what     = kUpdateAll;
-        close_volume();
     }
 
     if (what & kUpdateDevice) {
@@ -607,15 +503,6 @@ void update(const Device &d, uint8_t what) {
             if (jump) show_bar(false);
         } else {
             lv_bar_set_value(progress_bar, d.progress, LV_ANIM_OFF);
-        }
-    }
-    if (what & kUpdateVolume) {
-        // Don't let the server's echo fight the slider while it's being dragged
-        bool recent_local = lv_tick_elaps(last_local_volume_ms) < kVolumeEchoGuardMs;
-        if (!recent_local || what == kUpdateAll) {
-            shown.volume = d.volume;
-            shown.muted  = d.muted;
-            show_volume();
         }
     }
     if (what & kUpdateModes) {

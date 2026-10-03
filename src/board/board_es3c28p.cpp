@@ -13,11 +13,12 @@
 #include "es3c28p_audio.h"
 #include "es3c28p_panel.h"
 #include "es3c28p_pins.h"
+#include "driver/usb_serial_jtag.h"
 #include "esp_timer.h"
 
 namespace board {
 
-static const Info kInfo = {"ES3C28P 3.5\"", ES3C28P_LCD_H_RES, ES3C28P_LCD_V_RES, true, true};
+static const Info kInfo = {"ES3C28P 3.5\"", ES3C28P_LCD_H_RES, ES3C28P_LCD_V_RES, true, true, true};
 
 static const int      kBufferLines     = 40;  // partial buffers; full refresh trips the watchdog here
 static const uint32_t kTickPeriodMs    = 2;
@@ -230,8 +231,17 @@ void set_led_brightness(uint8_t percent) {
 void set_click_volume(uint8_t volume) { es3c28p_audio::set_volume(volume); }
 
 float battery_voltage() {
-    // Divider ratio not yet confirmed on hardware; reads ~0 V without a battery
-    return analogReadMilliVolts(ES3C28P_BATTERY_PIN) * ES3C28P_BATTERY_DIVIDER / 1000.0f;
+    // Divider ratio not yet confirmed on hardware; reads ~0 V without a battery.
+    // Averaged: the ADC is noisy and the WiFi radio disturbs single reads.
+    uint32_t sum = 0;
+    for (int i = 0; i < 8; i++) sum += analogReadMilliVolts(ES3C28P_BATTERY_PIN);
+    return sum / 8.0f * ES3C28P_BATTERY_DIVIDER / 1000.0f;
+}
+
+bool usb_power_present() {
+    // Native USB (Serial/JTAG): connected once a host enumerates. A charger-only cable is not
+    // seen here; battery.cpp also infers charging from the voltage trend.
+    return usb_serial_jtag_is_connected();
 }
 
 bool sd_mount() {

@@ -10,7 +10,7 @@
 
 namespace board {
 
-static const Info kInfo = {"Waveshare ESP32-S3 7B", EXAMPLE_LCD_H_RES, EXAMPLE_LCD_V_RES, false, false};
+static const Info kInfo = {"Waveshare ESP32-S3 7B", EXAMPLE_LCD_H_RES, EXAMPLE_LCD_V_RES, false, false, true};
 
 void init() {
     // Must run first: also brings up the shared I2C bus and the IO expander
@@ -52,6 +52,9 @@ float battery_voltage() {
     float v = IO_EXTENSION_Adc_Input() * 3 * 3.3f / 1023.0f;
     return min(v, 4.2f);
 }
+
+// No VBUS sense line on this board; battery.cpp infers charging from the voltage trend
+bool usb_power_present() { return false; }
 
 bool sd_mount() { return sd_mmc_init() == ESP_OK; }
 

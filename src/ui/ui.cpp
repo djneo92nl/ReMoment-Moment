@@ -6,7 +6,9 @@
 #include "library.h"
 #include "nav.h"
 #include "now_playing.h"
+#include "queue_screen.h"
 #include "settings_screen.h"
+#include "volume_screen.h"
 #include "widgets.h"
 
 namespace ui {
@@ -19,6 +21,7 @@ static lv_obj_t *status_detail;
 static lv_obj_t *status_code;
 
 static lv_obj_t *connection_icon;
+static lv_obj_t *battery_icon;
 static lv_obj_t *toast_label;
 static lv_timer_t *toast_timer;
 
@@ -78,10 +81,24 @@ static void load(lv_obj_t *screen, lv_scr_load_anim_t anim) {
 
 void nav::to_now_playing() {
     lv_obj_t *from = lv_scr_act();
-    lv_scr_load_anim_t anim = from == devices::list_screen() ? LV_SCR_LOAD_ANIM_MOVE_BOTTOM
-                            : from == library::screen()      ? LV_SCR_LOAD_ANIM_MOVE_TOP
-                                                             : LV_SCR_LOAD_ANIM_FADE_ON;
+    lv_scr_load_anim_t anim = from == devices::list_screen()   ? LV_SCR_LOAD_ANIM_MOVE_BOTTOM
+                            : from == library::screen()        ? LV_SCR_LOAD_ANIM_MOVE_TOP
+                            : from == volume_screen::screen() ? LV_SCR_LOAD_ANIM_MOVE_LEFT
+                            : from == queue_screen::screen()  ? LV_SCR_LOAD_ANIM_MOVE_RIGHT
+                                                               : LV_SCR_LOAD_ANIM_FADE_ON;
     load(now_playing::screen(), anim);
+}
+
+void nav::to_volume() {
+    if (!volume_screen::available()) return toast("No volume control");
+    volume_screen::open();
+    load(volume_screen::screen(), LV_SCR_LOAD_ANIM_MOVE_RIGHT);
+}
+
+void nav::to_queue() {
+    if (!queue_screen::available()) return toast("No queue");
+    queue_screen::open();
+    load(queue_screen::screen(), LV_SCR_LOAD_ANIM_MOVE_LEFT);
 }
 
 void nav::to_devices() {
@@ -139,11 +156,47 @@ void set_connection(bool wifi, bool server, bool mqtt) {
     lv_obj_clear_flag(connection_icon, LV_OBJ_FLAG_HIDDEN);
 }
 
+void set_battery(battery::Level level, int percent, bool usb) {
+    LvglLock lock;
+    if (!lock) return;
+    const char *glyph = percent <= 10 ? LV_SYMBOL_BATTERY_EMPTY : percent <= 15 ? LV_SYMBOL_BATTERY_1 : LV_SYMBOL_BATTERY_2;
+    bool low = percent >= 0 && level != battery::Level::Ok;
+    if (!usb && !low) {
+        lv_obj_add_flag(battery_icon, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    char text[16] = "";
+    if (usb) strlcat(text, LV_SYMBOL_CHARGE, sizeof(text));
+    if (low) strlcat(text, glyph, sizeof(text));
+    lv_label_set_text(battery_icon, text);
+    lv_obj_set_style_text_color(battery_icon,
+                                !low ? color::muted() : level == battery::Level::Critical ? color::error() : color::warning(), 0);
+    lv_obj_clear_flag(battery_icon, LV_OBJ_FLAG_HIDDEN);
+}
+
 // ---- Forwarders to the screens --------------------------------------------------
 
 void now_playing_update(const Device &device, uint8_t what) {
     LvglLock lock;
-    if (lock) now_playing::update(device, what);
+    if (!lock) return;
+    now_playing::update(device, what);
+    volume_screen::update(device, what);
+    queue_screen::update(device, what);
+}
+
+void volume_set_source(int device_id, const char *label) {
+    LvglLock lock;
+    if (lock) volume_screen::set_source(device_id, label);
+}
+
+void queue_set_items(int device_id, const QueueItem *items, int count) {
+    LvglLock lock;
+    if (lock) queue_screen::set_items(device_id, items, count);
+}
+
+void queue_load_failed(int device_id, bool unsupported) {
+    LvglLock lock;
+    if (lock) queue_screen::load_failed(device_id, unsupported);
 }
 
 void now_playing_set_notice(const char *text) {
@@ -248,11 +301,18 @@ void init() {
     devices::build(layout);
     library::build(layout);
     settings_screen::build(layout);
+    volume_screen::build(layout);
+    queue_screen::build(layout);
     idle::build(layout);
 
     connection_icon = widgets::label(lv_layer_top(), "", layout.font_body, color::error());
     lv_obj_align(connection_icon, LV_ALIGN_TOP_LEFT, layout.gap, layout.gap);
     lv_obj_add_flag(connection_icon, LV_OBJ_FLAG_HIDDEN);
+
+    // Right of the connection icon (which only shows while something is down)
+    battery_icon = widgets::label(lv_layer_top(), "", layout.font_body, color::warning());
+    lv_obj_align(battery_icon, LV_ALIGN_TOP_LEFT, layout.gap + 3 * layout.font_body->line_height, layout.gap);
+    lv_obj_add_flag(battery_icon, LV_OBJ_FLAG_HIDDEN);
 
     toast_label = widgets::label(lv_layer_top(), "", layout.font_body, color::text());
     lv_obj_set_style_bg_color(toast_label, lv_color_hex(0x202020), 0);

@@ -43,9 +43,14 @@ static const char *kSoundGroup   = "rm_sound";
 
 static volatile int calm_seconds = 8;  // cached: the LVGL task asks every 250 ms
 
+static const int kLowPowerMaxBrightness = 30;
+static volatile bool low_power = false;  // battery low: dim the screen, LED off
+
+static int effective_brightness(int percent) { return low_power ? min(percent, kLowPowerMaxBrightness) : percent; }
+
 static void apply_display() {
-    board::set_backlight(gsGetInt(kDisplayGroup, "bright"));
-    board::set_led_brightness(gsGetInt(kDisplayGroup, "led"));
+    board::set_backlight(effective_brightness(gsGetInt(kDisplayGroup, "bright")));
+    board::set_led_brightness(low_power ? 0 : gsGetInt(kDisplayGroup, "led"));
     calm_seconds = gsGetInt(kDisplayGroup, "calm");
 }
 static void on_display_changed(const GsField &) { apply_display(); }
@@ -82,12 +87,18 @@ static const char *key_of(Value v) {
     return "";
 }
 
+void set_low_power(bool on) {
+    if (on == low_power) return;
+    low_power = on;
+    apply_display();
+}
+
 int value(Value v) { return gsGetInt(group_of(v), key_of(v)); }
 
 void preview(Value v, int percent) {
     switch (v) {
-        case Value::Brightness:    board::set_backlight(max(percent, 10)); break;
-        case Value::LedBrightness: board::set_led_brightness(percent); break;
+        case Value::Brightness:    board::set_backlight(effective_brightness(max(percent, 10))); break;
+        case Value::LedBrightness: board::set_led_brightness(low_power ? 0 : percent); break;
         case Value::TapVolume:     board::set_click_volume(percent); break;
     }
     portENTER_CRITICAL(&preview_mux);
@@ -137,7 +148,11 @@ static String track_str() {
     return String(d->artist) + " - " + d->track + " (" + d->progress + "%)";
 }
 static String battery_str() {
-    return model.battery_voltage > 0.0f ? String(model.battery_voltage, 2) + " V" : String("-");
+    if (model.battery_percent < 0) return "-";
+    String s = String(model.battery_percent) + " % · " + String(model.battery_voltage, 2) + " V";
+    if (model.battery_full) s += " · full";
+    else if (model.battery_usb) s += " · charging";
+    return s;
 }
 static String sd_str() { return model.sd_available ? "Mounted" : "Not found"; }
 

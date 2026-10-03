@@ -27,6 +27,10 @@ bool take_rediscover_request();
 enum class Value : uint8_t { Brightness, LedBrightness, TapVolume };
 int value(Value v);
 
+// Battery low: caps the backlight at 30 % and turns the LED off; the stored settings are untouched.
+// Safe from any task.
+void set_low_power(bool on);
+
 // Applies a value right away; safe from any task (the device's settings screen)
 void preview(Value v, int percent);
 
