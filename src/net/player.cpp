@@ -12,7 +12,6 @@
 
 namespace player {
 
-static const unsigned long kNotPlayingTimeoutMs     = 15000;
 static const unsigned long kMqttReconnectIntervalMs = 10000;
 
 static WiFiClient   wifi_client;
@@ -140,7 +139,6 @@ static void on_message(char *topic, byte *payload, unsigned int length) {
         memcpy(value, payload, length);
         value[length]  = '\0';
         d.progress     = constrain(atoi(value), 0, 100);
-        d.last_data_ms = millis();
         if (current) ui::now_playing_update(d, ui::kUpdateProgress);
         return;
     }
@@ -159,7 +157,6 @@ static void on_message(char *topic, byte *payload, unsigned int length) {
             d.duration = doc["duration"] | -1;
             // No artwork object yet on the first play of a new cover (the server processes it async)
             parse_artwork(doc["artwork"], device_artwork[index]);
-            d.last_data_ms = millis();
         }
         if (current) artwork::request(device_artwork[index]);
         changed(index, ui::kUpdateTrack);
@@ -171,7 +168,6 @@ static void on_message(char *topic, byte *payload, unsigned int length) {
 
     if (strcmp(suffix, "state") == 0) {
         d.state = parse_state(doc["state"]);
-        if (d.state == PlayState::Playing) d.last_data_ms = millis();
         if (!d.active()) clear_track(d);
         changed(index, ui::kUpdateState | ui::kUpdateTrack);
     } else if (strcmp(suffix, "volume") == 0) {
@@ -246,16 +242,6 @@ void loop() {
     connect();
     mqtt.loop();
     model.mqtt_connected = mqtt.connected();
-
-    // Fallback when the server goes quiet: no progress for a while = not playing
-    unsigned long now = millis();
-    for (int i = 0; i < model.device_count; i++) {
-        Device &d = model.devices[i];
-        if (d.state == PlayState::Playing && now - d.last_data_ms > kNotPlayingTimeoutMs) {
-            d.state = PlayState::Unknown;
-            changed(i, ui::kUpdateState);
-        }
-    }
 }
 
 }  // namespace player

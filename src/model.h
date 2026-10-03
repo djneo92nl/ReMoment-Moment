@@ -41,7 +41,6 @@ struct Device {
     char      album[64]  = "";
     int       duration   = -1;  // seconds, -1 = unknown
     int       progress   = 0;   // 0-100
-    unsigned long last_data_ms = 0;
     int       volume  = -1;     // 0-100, -1 = unknown
     bool      muted   = false;
     int8_t    shuffle = -1;     // -1 unknown, 0 off, 1 on
