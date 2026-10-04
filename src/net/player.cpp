@@ -113,6 +113,7 @@ static void changed(int index, uint8_t what) {
 
 static void clear_track(Device &d) {
     d.track[0] = d.artist[0] = d.album[0] = '\0';
+    d.album_id = 0;
     d.progress = 0;
     d.duration = -1;
 }
@@ -154,6 +155,7 @@ static void on_message(char *topic, byte *payload, unsigned int length) {
             strlcpy(d.artist, doc["artist"] | "", sizeof(d.artist));
             strlcpy(d.track, doc["track"] | "", sizeof(d.track));
             strlcpy(d.album, doc["album"] | "", sizeof(d.album));
+            d.album_id = doc["album_id"] | 0;
             d.duration = doc["duration"] | -1;
             // No artwork object yet on the first play of a new cover (the server processes it async)
             parse_artwork(doc["artwork"], device_artwork[index]);

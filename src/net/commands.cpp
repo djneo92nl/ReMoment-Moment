@@ -123,6 +123,7 @@ static void load_queue(int device_id) {
         strlcpy(it.artist, q["artist"] | "", sizeof(it.artist));
         strlcpy(it.album, q["album"] | "", sizeof(it.album));
         it.duration = q["duration"] | -1;
+        strlcpy(it.thumb, q["artwork"]["proxy_120"] | "", sizeof(it.thumb));
     }
     ui::queue_set_items(device_id, items, n);
 }
@@ -235,6 +236,17 @@ static void playlist_item(JsonObjectConst a, ui::LibItem &it) {
     strlcpy(it.cover, a["artwork"]["proxy_320"] | "", sizeof(it.cover));
 }
 
+static void track_item(JsonObjectConst a, ui::LibItem &it) {
+    it.kind     = ui::LibKind::Track;
+    it.id       = a["id"] | 0;
+    it.album_id = a["album_id"] | 0;
+    strlcpy(it.title, a["name"] | "", sizeof(it.title));
+    snprintf(it.subtitle, sizeof(it.subtitle), "%s - %s", (const char *)(a["artist_name"] | ""),
+             (const char *)(a["album_name"] | ""));
+    strlcpy(it.thumb, a["artwork"]["proxy_120"] | "", sizeof(it.thumb));
+    strlcpy(it.cover, a["artwork"]["proxy_320"] | "", sizeof(it.cover));
+}
+
 static int add_items(JsonArrayConst list, int n, void (*fill)(JsonObjectConst, ui::LibItem &), uint8_t shelf = 0,
                      int max = kMaxItems) {
     int added = 0;
@@ -246,6 +258,30 @@ static int add_items(JsonArrayConst list, int n, void (*fill)(JsonObjectConst, u
         added++;
     }
     return n;
+}
+
+static String url_encode(const char *s) {
+    String out;
+    for (; *s; s++) {
+        if (isalnum((unsigned char)*s) || *s == '-' || *s == '_' || *s == '.' || *s == '~') out += *s;
+        else {
+            char hex[4];
+            snprintf(hex, sizeof(hex), "%%%02X", (unsigned char)*s);
+            out += hex;
+        }
+    }
+    return out;
+}
+
+static void load_search(const char *query) {
+    if (!ensure_buffers()) return;
+    JsonDocument res(api::psram());
+    String path = String("/library/search?q=") + url_encode(query);
+    if (!api::ok(api::get(path.c_str(), res))) return ui::library_load_failed();
+    int n = add_items(res["artists"], 0, artist_item, 0, 10);
+    n     = add_items(res["albums"], n, album_item, 1, 15);
+    n     = add_items(res["tracks"], n, track_item, 2, 20);
+    ui::library_set_search(query, items, n);
 }
 
 // `text`: "" = first page, "more" = next page, "letter:X" = Artists from letter X (A-Z bar)
@@ -508,6 +544,19 @@ static void run(const Command &c) {
             break;
         }
         case Type::LoadLibrary:    load_library((ui::LibView)c.value, c.text); break;
+        case Type::LoadSearch:     load_search(c.text); break;
+        case Type::Seek: {
+            JsonDocument v;
+            v.set(c.value);
+            put_value(c.device_id, "seek", "position", v.as<JsonVariantConst>());
+            break;
+        }
+        case Type::QueueJump: {
+            JsonDocument body, res;
+            body["position"] = c.value;
+            report(api::post(device_path(c.device_id, "queue/jump").c_str(), body, res), c.device_id, res);
+            break;
+        }
         case Type::LoadArtist:     load_artist(c.value); break;
         case Type::LoadAlbum:      load_album(c.value); break;
         case Type::LoadPlaylist:   load_playlist(c.value); break;

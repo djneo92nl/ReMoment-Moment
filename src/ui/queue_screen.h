@@ -25,4 +25,7 @@ void update(const Device &device, uint8_t what);
 void set_items(int device_id, const QueueItem *items, int count);
 void load_failed(int device_id, bool unsupported);
 
+// A cover the artwork task decoded for a row; false when the row is gone or it isn't ours
+bool thumb_ready(uint32_t token, const lv_img_dsc_t *image);
+
 }  // namespace ui::queue_screen

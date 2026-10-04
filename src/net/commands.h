@@ -35,6 +35,9 @@ enum class Type : uint8_t {
     PlayPlaylist,    // value = playlist id, value2 = start track id (0 = from the start)
     LoadSource,      // active source of the device, for the volume screen
     LoadQueue,       // upcoming tracks of the device, for the queue screen
+    LoadSearch,      // text = query (at least 2 characters)
+    Seek,            // value = position in seconds
+    QueueJump,       // value = places ahead in the queue (1 = next track)
 };
 
 struct Command {

@@ -32,7 +32,7 @@ static uint16_t parse_capabilities(JsonArrayConst caps) {
         {"library_playback", kCapLibraryPlayback},   {"seek", kCapSeek},
         {"queue", kCapQueue},                  {"shuffle", kCapShuffle},
         {"repeat", kCapRepeat},                {"like", kCapLike},
-        {"power", kCapPower},
+        {"power", kCapPower},                  {"queue_jump", kCapQueueJump},
     };
     uint16_t bits = 0;
     for (const char *c : caps) {

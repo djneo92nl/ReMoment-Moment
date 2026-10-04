@@ -23,6 +23,7 @@ enum Capability : uint16_t {
     kCapRepeat           = 1 << 10,
     kCapLike             = 1 << 11,
     kCapPower            = 1 << 12,
+    kCapQueueJump        = 1 << 13,
 };
 
 enum class PlayState : uint8_t { Unknown, Playing, Paused, Standby, Unreachable };
@@ -39,7 +40,8 @@ struct Device {
     char      track[64]  = "";
     char      artist[64] = "";
     char      album[64]  = "";
-    int       duration   = -1;  // seconds, -1 = unknown
+    int       album_id   = 0;   // library album of the playing track, 0 = not in the library
+    int       duration  = -1;  // seconds, -1 = unknown
     int       progress   = 0;   // 0-100
     int       volume  = -1;     // 0-100, -1 = unknown
     bool      muted   = false;

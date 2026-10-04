@@ -34,6 +34,7 @@ static struct {
     int8_t    shuffle = -1;
     Repeat    repeat = Repeat::Unknown;
     int8_t    liked = -1;
+    int       album_id = 0;   // library album, 0 = none (tapping the cover does nothing)
     int       duration = -1;  // seconds
     int       elapsed  = 0;   // seconds, ticks on locally while playing
 } shown;
@@ -100,11 +101,40 @@ static void show_bar(bool animate) {
 }
 
 // /progress is a percentage (1% of a 4 minute track is 2.4 s): count seconds locally
+static bool seeking = false;  // a finger is on the bar: it shows where it would seek to
+
 static void tick_elapsed(lv_timer_t *) {
-    if (shown.state != PlayState::Playing || shown.duration <= 0 || shown.elapsed >= shown.duration) return;
+    if (seeking || shown.state != PlayState::Playing || shown.duration <= 0 || shown.elapsed >= shown.duration) return;
     shown.elapsed++;
     show_times();
     show_bar(false);
+}
+
+// Drag on the bar to seek: the bar and time follow the finger, and the seek is sent once on
+// release. In calm mode (bar faded) a touch only wakes.
+static void on_bar(lv_event_t *e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_PRESS_LOST) {
+        seeking = false;
+        return;
+    }
+    if (calm || shown.duration <= 0 || !(shown.caps & kCapSeek)) return;
+
+    if (code == LV_EVENT_PRESSED || code == LV_EVENT_PRESSING) {
+        lv_point_t p;
+        lv_indev_get_point(lv_indev_get_act(), &p);
+        lv_area_t a;
+        lv_obj_get_coords(progress_bar, &a);
+        int w   = LV_MAX(lv_area_get_width(&a), 1);
+        int x   = LV_CLAMP(0, p.x - a.x1, w);
+        seeking = true;
+        shown.elapsed = (int)((int64_t)x * shown.duration / w);
+        show_times();
+        show_bar(false);
+    } else if (code == LV_EVENT_RELEASED && seeking) {
+        seeking = false;
+        commands::post(commands::Type::Seek, shown.id, shown.elapsed);
+    }
 }
 
 // ---- Controls -------------------------------------------------------------------
@@ -189,6 +219,12 @@ static void on_gesture(lv_dir_t dir) {
         case LV_DIR_LEFT:   nav::to_queue(); break;
         default: break;
     }
+}
+
+// Tap the cover: open the playing album in the library. In calm mode a touch only wakes.
+static void on_cover(lv_event_t *) {
+    if (calm || shown.album_id <= 0) return;
+    nav::to_album(shown.album_id);
 }
 
 // ---- Cross-fade -----------------------------------------------------------------
@@ -331,6 +367,9 @@ void build(const Layout &l) {
     // Cover: a plain square placeholder, with the two artwork layers on top
     cover_box = widgets::box(scr);
     lv_obj_set_size(cover_box, l.cover, l.cover);
+    lv_obj_add_flag(cover_box, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(cover_box, LV_OBJ_FLAG_GESTURE_BUBBLE);  // swipes still reach the screen
+    lv_obj_add_event_cb(cover_box, on_cover, LV_EVENT_CLICKED, nullptr);
     // Square on purpose: clip_corner renders the cover through a masked layer in PSRAM, and on
     // the 7" RGB panel that extra traffic brought the glitches back
     lv_obj_t *placeholder = widgets::box(cover_box);
@@ -365,8 +404,8 @@ void build(const Layout &l) {
     lv_label_set_long_mode(album_label, LV_LABEL_LONG_DOT);
     if (!l.landscape) lv_obj_add_flag(album_label, LV_OBJ_FLAG_HIDDEN);  // no room in portrait
 
-    // A bar, not a slider: seeking isn't planned, and a slider would swallow swipes.
-    // Landscape: in the column, with elapsed / total time below. Portrait: bottom, full width.
+    // A bar you can drag (on_bar), not a slider: the look stays, and it swallows no swipes
+    // outside its own area. Landscape: in the column, with elapsed / total time below. Portrait: bottom, full width.
     lv_obj_t *bar_parent = info;
     if (l.landscape) {
         lv_obj_t *spacer = widgets::box(info);  // LVGL 8 has no margins
@@ -381,6 +420,10 @@ void build(const Layout &l) {
     lv_obj_set_style_bg_color(progress_bar, lv_color_hex(0x2A2A2A), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(progress_bar, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(progress_bar, 0, LV_PART_MAIN);
+    lv_obj_add_flag(progress_bar, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(progress_bar, LV_OBJ_FLAG_GESTURE_BUBBLE);  // a drag along it is a seek, not a swipe
+    lv_obj_set_ext_click_area(progress_bar, l.btn / 3);           // 8-10 px is too thin to hit
+    lv_obj_add_event_cb(progress_bar, on_bar, LV_EVENT_ALL, nullptr);
     if (l.landscape) {
         lv_obj_set_size(progress_bar, lv_pct(100), 10);
         lv_obj_t *times = times_row = widgets::box(info);
@@ -477,6 +520,7 @@ void update(const Device &d, uint8_t what) {
     }
     if (what & (kUpdateTrack | kUpdateState)) {
         bool active = d.active();
+        shown.album_id = active ? d.album_id : 0;
         lv_label_set_text(track_label, active && d.track[0] ? d.track : "-");
         lv_label_set_text(artist_label, active ? d.artist : "");
         lv_label_set_text(album_label, active ? d.album : "");
@@ -493,7 +537,7 @@ void update(const Device &d, uint8_t what) {
         shown.state = d.state;
         show_play_state();
     }
-    if (what & kUpdateProgress) {
+    if ((what & kUpdateProgress) && !seeking) {
         // Resync the local clock only when it drifted further than the percentage's resolution
         if (shown.duration > 0) {
             int from_server = d.progress * shown.duration / 100;

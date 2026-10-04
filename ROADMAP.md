@@ -103,7 +103,7 @@ Server support per driver (untested on hardware: ASE power-on, Mozart shuffle/re
 - [x] **[S] Favorites** — new concept on the server (none exists yet)
 - [x] **[C] Library screen** (swipe down) — artists → albums → tracks, recently played, favorites
 - [x] **[C] Play now** on the current device via `library/play`
-- [ ] **[C] Tap album cover** on Now Playing → open that album *(optional shortcut; needs `album_id` in the MQTT `/data` payload)*
+- [x] **[C] Tap album cover** on Now Playing → open that album *(optional shortcut; needs `album_id` in the MQTT `/data` payload)*
 
 ## Power and battery (alongside the phases)
 
@@ -127,9 +127,9 @@ Board: ES3C28P (ST77922 320×480 QSPI panel, custom-protocol touch at I2C `0x55`
 
 ## Later
 
-- [ ] Search (on-screen keyboard)
+- [x] Search (on-screen keyboard) — artists, albums, tracks (`GET /api/library/search`)
 - [ ] Playlists
-- [x] Queue view (text only, no artwork yet) (`GET /devices/{id}/queue`)
+- [x] Queue view with covers; tap a row to play it (`POST /devices/{id}/queue/jump`: Sonos, Spotify). Drag the progress bar to seek (`GET /devices/{id}/queue`)
 - [ ] Video device support
 
 ## Dropped

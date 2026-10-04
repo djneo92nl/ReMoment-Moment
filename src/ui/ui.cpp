@@ -124,6 +124,11 @@ void nav::to_library() {
     load(library::screen(), LV_SCR_LOAD_ANIM_MOVE_BOTTOM);
 }
 
+void nav::to_album(int album_id) {
+    library::open_album(album_id);
+    load(library::screen(), LV_SCR_LOAD_ANIM_MOVE_BOTTOM);
+}
+
 static void hide_toast(lv_timer_t *timer) {
     lv_obj_add_flag(toast_label, LV_OBJ_FLAG_HIDDEN);
     lv_timer_pause(timer);
@@ -234,6 +239,11 @@ void library_set_album(const LibAlbum &album, const LibTrack *tracks, int count)
     if (lock) library::set_album(album, tracks, count);
 }
 
+void library_set_search(const char *query, const LibItem *items, int count) {
+    LvglLock lock;
+    if (lock) library::set_search(query, items, count);
+}
+
 void library_load_failed() {
     LvglLock lock;
     if (lock) library::load_failed();
@@ -241,7 +251,8 @@ void library_load_failed() {
 
 bool library_thumb(uint32_t token, const lv_img_dsc_t *image) {
     LvglLock lock;
-    return lock && library::thumb_ready(token, image);
+    // Library generations stay below 0x8000, the queue screen's start there
+    return lock && (library::thumb_ready(token, image) || queue_screen::thumb_ready(token, image));
 }
 
 void settings_set_info(const SettingsInfo &info) {

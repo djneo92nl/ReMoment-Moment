@@ -13,7 +13,7 @@ static const int kThumbSize = 120;  // server's proxy_120
 static const int kMaxThumbs = 240;  // tiles per view with artwork; only those near the screen hold pixels
 static const int kMaxDepth  = 8;
 
-enum class Mode : uint8_t { Home, Artist, Album, Playlist };
+enum class Mode : uint8_t { Home, Artist, Album, Playlist, Search };
 struct Entry {
     Mode mode;
     int  id;
@@ -59,6 +59,21 @@ static int thumb_count = 0;
 static bool more_available = false;
 static bool loading_more   = false;
 static bool favorite       = false;
+
+// Search: a text box in the header, the keyboard below the results. The keyboard is up
+// while typing and goes away on Enter or when a result is opened. A search starts 400 ms
+// after the last key; hits are plain rows on every screen size.
+static const int kSearchDelayMs = 400;
+static const int kMaxHits       = 24;  // track hits: id and album, so a row's tap can play it
+static lv_obj_t   *search_btn;
+static lv_obj_t   *search_ta;
+static lv_obj_t   *keyboard;
+static lv_timer_t *search_timer;
+static char        search_text[48];
+static struct {
+    int track, album;
+} hits[kMaxHits];
+static int hit_count = 0;
 
 static const Entry &current() { return stack[depth - 1]; }
 
@@ -130,7 +145,8 @@ static void clear_content() {
     lv_obj_scroll_to_y(content, 0, LV_ANIM_OFF);
     grid        = nullptr;
     thumb_count = 0;
-    generation  = generation == 0xFFFF ? 1 : generation + 1;
+    hit_count   = 0;
+    generation  = generation == 0x7FFF ? 1 : generation + 1;  // 0x8000 and up: the queue screen's
     lv_img_cache_invalidate_src(nullptr);
     artwork::thumbs_release(generation);
     more_available = loading_more = false;
@@ -174,6 +190,53 @@ static void on_tab(lv_event_t *e) {
     render();
 }
 
+// ---- Search ---------------------------------------------------------------------------
+
+// Keyboard in or out; the results get the room above it
+static void fit_search(bool keyboard_up) {
+    lv_coord_t top = lv_obj_get_y(content);
+    lv_coord_t kb  = keyboard_up ? layout.height * 45 / 100 : 0;
+    set_visible(keyboard, keyboard_up);
+    lv_obj_set_height(content, layout.height - top - kb);
+}
+
+static void run_search() {
+    if (strlen(search_text) < 2) {
+        clear_content();
+        show_message("Type at least 2 letters");
+        return;
+    }
+    commands::post(commands::Type::LoadSearch, -1, 0, search_text);
+}
+
+static void on_search_timer(lv_timer_t *t) {
+    lv_timer_pause(t);
+    if (current().mode == Mode::Search) run_search();
+}
+
+static void on_search_text(lv_event_t *) {
+    strlcpy(search_text, lv_textarea_get_text(search_ta), sizeof(search_text));
+    lv_timer_reset(search_timer);
+    lv_timer_resume(search_timer);
+}
+
+static void on_search_tap(lv_event_t *) { fit_search(true); }
+
+// Enter: search at once and give the results the whole screen; the cross: just hide the keyboard
+static void on_keyboard(lv_event_t *e) {
+    if (lv_event_get_code(e) == LV_EVENT_READY) {
+        lv_timer_pause(search_timer);
+        run_search();
+    }
+    fit_search(false);
+}
+
+static void on_search_open(lv_event_t *) {
+    search_text[0] = '\0';
+    lv_textarea_set_text(search_ta, "");
+    push(Mode::Search, 0);
+}
+
 static void on_album(lv_event_t *e) { push(Mode::Album, (int)(intptr_t)lv_event_get_user_data(e)); }
 static void on_artist(lv_event_t *e) { push(Mode::Artist, (int)(intptr_t)lv_event_get_user_data(e)); }
 static void on_playlist(lv_event_t *e) { push(Mode::Playlist, (int)(intptr_t)lv_event_get_user_data(e)); }
@@ -207,7 +270,9 @@ static void on_shuffle_artist(lv_event_t *) {
     nav::to_now_playing();
 }
 
-static bool use_shelves() { return layout.landscape; }  // wide screens: shelves, portrait: lists
+// Wide screens: shelves, portrait: lists. Search hits are always lists: the keyboard
+// leaves no room for a shelf.
+static bool use_shelves() { return layout.landscape && current().mode != Mode::Search; }
 
 static void load_more() {
     if (!more_available || loading_more) return;
@@ -232,18 +297,33 @@ static void letter_command(char *buf, size_t size) {
     snprintf(buf, size, "letter:%c", letter);
 }
 
+static void fit_search(bool keyboard_up);
+
 static void render() {
     clear_content();
     const Entry &e = current();
-    bool home = e.mode == Mode::Home;
+    bool home      = e.mode == Mode::Home;
+    bool searching = e.mode == Mode::Search;
     set_visible(back_btn, !home);
     set_visible(tabs_row, home);
-    set_visible(favorite_btn, !home);
+    set_visible(search_btn, home);
+    set_visible(favorite_btn, !home && !searching);
+    set_visible(title_label, !searching);
+    set_visible(search_ta, searching);
+    if (!searching) set_visible(keyboard, false);
 
     lv_coord_t top = layout.margin / 2 + layout.btn + (home ? layout.btn_small + layout.gap : layout.gap);
     lv_obj_set_pos(content, layout.margin, top);
     lv_obj_set_style_pad_top(content, 0, 0);  // the Radio row adds its own
     lv_obj_set_size(content, layout.width - 2 * layout.margin, layout.height - top);
+
+    if (searching) {
+        // Fresh search: keyboard up. Back from a hit: results first, tap the box to type again.
+        fit_search(search_text[0] == '\0');
+        if (strlen(search_text) < 2) show_message("Type to search");
+        else commands::post(commands::Type::LoadSearch, -1, 0, search_text);
+        return;
+    }
 
     if (home) {
         lv_label_set_text(title_label, "Library");
@@ -272,11 +352,28 @@ static void on_station(lv_event_t *e) {
     nav::to_now_playing();
 }
 
+// A track hit plays through its album from that track; the tap carries the hit's index
+static void on_track_hit(lv_event_t *e) {
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    if (i < 0 || i >= hit_count) return;
+    commands::post(commands::Type::PlayAlbum, -1, hits[i].album, nullptr, hits[i].track);
+    nav::to_now_playing();
+}
+
 static lv_event_cb_t open_cb(LibKind kind) {
     return kind == LibKind::Artist     ? on_artist
          : kind == LibKind::Playlist ? on_playlist
          : kind == LibKind::Station  ? on_station
+         : kind == LibKind::Track    ? on_track_hit
                                      : on_album;
+}
+
+// What a tile or row passes to its tap handler: the item id, or for a track hit its index
+static void *open_arg(const LibItem &it) {
+    if (it.kind != LibKind::Track) return (void *)(intptr_t)it.id;
+    if (hit_count >= kMaxHits) return (void *)(intptr_t)-1;
+    hits[hit_count] = {it.id, it.album_id};
+    return (void *)(intptr_t)hit_count++;
 }
 
 // A station without artwork: a light square with a note, like the Moment's placeholder
@@ -297,7 +394,7 @@ static void add_tile(lv_obj_t *parent, const LibItem &it) {
     lv_obj_set_flex_align(tile, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(tile, 4, 0);
     lv_obj_set_style_opa(tile, LV_OPA_60, LV_STATE_PRESSED);
-    lv_obj_add_event_cb(tile, open_cb(it.kind), LV_EVENT_CLICKED, (void *)(intptr_t)it.id);
+    lv_obj_add_event_cb(tile, open_cb(it.kind), LV_EVENT_CLICKED, open_arg(it));
 
     lv_obj_t *art = size > kThumbSize && it.cover[0] ? thumb(tile, size, it.cover, true, true) : thumb(tile, size, it.thumb);
     station_placeholder(art, it);
@@ -321,7 +418,7 @@ static void add_row(lv_obj_t *parent, const LibItem &it) {
     lv_obj_set_style_border_color(r, lv_color_hex(0x202020), 0);
     lv_obj_set_style_bg_color(r, color::text(), 0);
     lv_obj_set_style_bg_opa(r, LV_OPA_10, LV_STATE_PRESSED);
-    lv_obj_add_event_cb(r, open_cb(it.kind), LV_EVENT_CLICKED, (void *)(intptr_t)it.id);
+    lv_obj_add_event_cb(r, open_cb(it.kind), LV_EVENT_CLICKED, open_arg(it));
 
     lv_coord_t size = layout.row - layout.gap;
     lv_obj_t *th = thumb(r, size, it.thumb);
@@ -431,6 +528,16 @@ void set_items(LibView view, const LibItem *items, int count, bool append, bool 
             if (use_shelves()) add_letter_bar();  // a portrait list is scrolled instead
             break;
     }
+    update_thumbs();
+}
+
+void set_search(const char *query, const LibItem *items, int count) {
+    if (current().mode != Mode::Search || strcmp(query, search_text) != 0) return;
+    clear_content();
+    if (count == 0) show_message("No results");
+    add_section("ARTISTS", items, count, 0);
+    add_section("ALBUMS", items, count, 1);
+    add_section("TRACKS", items, count, 2);
     update_thumbs();
 }
 
@@ -574,6 +681,42 @@ void build(const Layout &l) {
     lv_obj_align(close, LV_ALIGN_RIGHT_MID, 0, 0);
     favorite_btn = widgets::round_button(h, LV_SYMBOL_PLUS, l.btn_small, l.font_body, on_favorite);
     lv_obj_align(favorite_btn, LV_ALIGN_RIGHT_MID, -(l.btn_small + l.gap), 0);
+    // Home only, where the favorite button is hidden
+    search_btn = widgets::round_button(h, LV_SYMBOL_KEYBOARD, l.btn_small, l.font_body, on_search_open);
+    lv_obj_align(search_btn, LV_ALIGN_RIGHT_MID, -(l.btn_small + l.gap), 0);
+
+    // Search box in the title's place (shown in search mode only)
+    search_ta = lv_textarea_create(scr);
+    lv_textarea_set_one_line(search_ta, true);
+    lv_textarea_set_max_length(search_ta, sizeof(search_text) - 8);
+    lv_textarea_set_placeholder_text(search_ta, "Artist, album or track");
+    lv_obj_set_size(search_ta, l.width - 2 * l.margin - 3 * (l.btn_small + l.gap) + l.gap, l.btn_small);
+    lv_obj_set_pos(search_ta, l.margin + l.btn_small + l.gap, l.margin / 2 + (l.btn - l.btn_small) / 2);
+    lv_obj_set_style_bg_color(search_ta, lv_color_hex(0x1A1A1A), 0);
+    lv_obj_set_style_bg_opa(search_ta, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(search_ta, color::muted(), 0);
+    lv_obj_set_style_text_color(search_ta, color::text(), 0);
+    lv_obj_set_style_text_font(search_ta, l.font_body, 0);
+    lv_obj_clear_flag(search_ta, LV_OBJ_FLAG_GESTURE_BUBBLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(search_ta, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(search_ta, on_search_text, LV_EVENT_VALUE_CHANGED, nullptr);
+    lv_obj_add_event_cb(search_ta, on_search_tap, LV_EVENT_CLICKED, nullptr);
+
+    keyboard = lv_keyboard_create(scr);
+    lv_keyboard_set_textarea(keyboard, search_ta);
+    lv_obj_set_size(keyboard, l.width, l.height * 45 / 100);
+    lv_obj_align(keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_text_font(keyboard, l.font_body, LV_PART_ITEMS);
+    lv_obj_set_style_bg_color(keyboard, color::bg(), 0);
+    lv_obj_set_style_bg_color(keyboard, lv_color_hex(0x1A1A1A), LV_PART_ITEMS);
+    lv_obj_set_style_text_color(keyboard, color::text(), LV_PART_ITEMS);
+    lv_obj_clear_flag(keyboard, LV_OBJ_FLAG_GESTURE_BUBBLE);  // typing must not swipe away
+    lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(keyboard, on_keyboard, LV_EVENT_READY, nullptr);
+    lv_obj_add_event_cb(keyboard, on_keyboard, LV_EVENT_CANCEL, nullptr);
+
+    search_timer = lv_timer_create(on_search_timer, kSearchDelayMs, nullptr);
+    lv_timer_pause(search_timer);
 
     // Tabs like the Moment's: plain words centred at the top, the selected one white
     tabs_row = widgets::box(scr);
@@ -606,6 +749,12 @@ lv_obj_t *screen() { return scr; }
 
 void open_home() {
     depth = 1;
+    render();
+}
+
+void open_album(int album_id) {
+    stack[1] = {Mode::Album, album_id};
+    depth    = 2;
     render();
 }
 

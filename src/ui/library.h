@@ -15,10 +15,13 @@ lv_obj_t *screen();
 
 // Shows the home tabs (keeps the last selected tab)
 void open_home();
+// Shows an album with the home tabs one step back
+void open_album(int album_id);
 
 void set_items(LibView view, const LibItem *items, int count, bool append, bool more);
 void set_artist(int artist_id, const char *name, bool favorite, const LibItem *albums, int count);
 void set_album(const LibAlbum &album, const LibTrack *tracks, int count);
+void set_search(const char *query, const LibItem *items, int count);
 void load_failed();
 bool thumb_ready(uint32_t token, const lv_img_dsc_t *image);
 

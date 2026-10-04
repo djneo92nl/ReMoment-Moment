@@ -58,16 +58,18 @@ struct QueueItem {
     char artist[48];
     char album[48];
     int  duration;  // seconds, -1 = unknown
+    char thumb[192];  // proxy_120 URL, "" = none
 };
 void queue_set_items(int device_id, const QueueItem *items, int count);
 void queue_load_failed(int device_id, bool unsupported);
 
 // Library (swipe down from Now Playing). Data is loaded by commands::Type::Load*.
 enum class LibView : uint8_t { Recent, Favorites, Artists, Radio, Playlists };
-enum class LibKind : uint8_t { Album, Artist, Station, Playlist };
+enum class LibKind : uint8_t { Album, Artist, Station, Playlist, Track };  // Track: search hits only
 struct LibItem {
     LibKind kind;
     int     id;
+    int     album_id;    // Track: the album to play it through
     char    title[64];
     char    subtitle[64];
     char    thumb[192];  // proxy_120 URL, "" = none
@@ -97,6 +99,9 @@ struct LibAlbum {
 void library_set_items(LibView view, const LibItem *items, int count, bool append, bool more);
 void library_set_artist(int artist_id, const char *name, bool favorite, const LibItem *albums, int count);
 void library_set_album(const LibAlbum &album, const LibTrack *tracks, int count);
+// Search hits (shelf 0 artists, 1 albums, 2 tracks) for `query`; dropped when it is no longer
+// what the search box says
+void library_set_search(const char *query, const LibItem *items, int count);
 void library_load_failed();
 // From the artwork task: a thumbnail for `token` is decoded. Returns false when the
 // screen no longer wants it (the caller then frees the image).

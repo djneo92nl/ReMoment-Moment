@@ -7,6 +7,7 @@ void to_now_playing();
 void to_devices();
 void to_details(int device_id);
 void to_library();
+void to_album(int album_id);  // library, straight on an album; back goes to the library tabs
 void to_settings();
 // Side screens of Now Playing; stay put (with a toast) when the device can't do it
 void to_volume();
