@@ -50,39 +50,21 @@ static const char *device_name(int device_id) {
     return i >= 0 ? model.device_at(i)->name : "the device";
 }
 
+static remoment::Control &ctl() { return player::client().control(); }
+
 // Turns an API failure into a short message for the toast
 static bool report(int status, int device_id, const JsonDocument &res) {
     if (api::ok(status)) return true;
     char msg[96];
-    if (status <= 0) {
-        snprintf(msg, sizeof(msg), "Can't reach the server");
-    } else if (status == 503) {
-        snprintf(msg, sizeof(msg), "%s is not reachable", device_name(device_id));
-    } else if (status == 422) {
-        snprintf(msg, sizeof(msg), "%s can't do that", device_name(device_id));
-    } else {
-        const char *m = res["message"] | "";
-        snprintf(msg, sizeof(msg), "%s", *m ? m : "Something went wrong");
-    }
+    remoment::describeError(status, res, device_name(device_id), msg, sizeof(msg));
     ui::toast(msg);
     return false;
 }
 
-static void put_value(int device_id, const char *what, const char *key, JsonVariantConst value) {
-    JsonDocument body, res;
-    body[key] = value;
-    report(api::put(device_path(device_id, what).c_str(), body, res), device_id, res);
-}
-
-static void put_bool(int device_id, const char *what, const char *key, bool value) {
-    JsonDocument v;
-    v.set(value);
-    put_value(device_id, what, key, v.as<JsonVariantConst>());
-}
-
-static void post_action(int device_id, const char *action) {
-    JsonDocument body, res;
-    report(api::post(device_path(device_id, action).c_str(), body, res), device_id, res);
+// For Control calls, which only hand back the status
+static bool report(int status, int device_id) {
+    static const JsonDocument none;
+    return report(status, device_id, none);
 }
 
 // ---- Volume and queue screens -------------------------------------------------------
@@ -91,7 +73,7 @@ static void post_action(int device_id, const char *action) {
 static void load_source(int device_id) {
     JsonDocument res;
     const char *label = "";
-    if (api::ok(api::get(device_path(device_id, "sources").c_str(), res))) {
+    if (api::ok(ctl().sources(device_id, res))) {
         for (JsonObjectConst s : res["sources"].as<JsonArrayConst>()) {
             if (s["in_use"] | false) {
                 const char *name = s["friendly_name"] | "";
@@ -111,8 +93,7 @@ static void load_queue(int device_id) {
     if (!items) return ui::queue_load_failed(device_id, false);
 
     JsonDocument res(api::psram());
-    String path = device_path(device_id, "queue?limit=") + kMaxQueue;
-    int status = api::get(path.c_str(), res);
+    int status = ctl().queue(device_id, kMaxQueue, res);
     if (!api::ok(status)) return ui::queue_load_failed(device_id, status == 422);
 
     int n = 0;
@@ -141,7 +122,7 @@ static void load_details(int device_id) {
     if (d.has(kCapSourceActivation)) {
         JsonDocument res;
         int n = 0;
-        if (api::ok(api::get(device_path(device_id, "sources").c_str(), res))) {
+        if (api::ok(ctl().sources(device_id, res))) {
             for (JsonObjectConst s : res["sources"].as<JsonArrayConst>()) {
                 if (n >= kMaxOptions) break;
                 ui::Option &o = options[n++];
@@ -157,7 +138,7 @@ static void load_details(int device_id) {
     if (d.has(kCapRadio)) {
         JsonDocument res;
         int n = 0;
-        if (api::ok(api::get(device_path(device_id, "radio").c_str(), res))) {
+        if (api::ok(ctl().radioStations(device_id, res))) {
             for (JsonObjectConst s : res["stations"].as<JsonArrayConst>()) {
                 if (n >= kMaxOptions) break;
                 ui::Option &o = options[n++];
@@ -483,21 +464,15 @@ static void load_settings_info() {
 static void run(const Command &c) {
     Serial.printf("[commands] type %d device %d value %d\n", (int)c.type, c.device_id, c.value);
     switch (c.type) {
-        case Type::Play:     post_action(c.device_id, "play"); break;
-        case Type::Pause:    post_action(c.device_id, "pause"); break;
-        case Type::Next:     post_action(c.device_id, "next"); break;
-        case Type::Previous: post_action(c.device_id, "previous"); break;
-        case Type::Mute:     put_bool(c.device_id, "mute", "muted", c.value); break;
-        case Type::Shuffle:  put_bool(c.device_id, "shuffle", "shuffle", c.value); break;
-        case Type::Like:     put_bool(c.device_id, "like", "liked", c.value); break;
-        case Type::Power:    put_bool(c.device_id, "power", "on", c.value); break;
-        case Type::Repeat: {
-            static const char *kModes[] = {"off", "off", "all", "one"};  // indexed by Repeat
-            JsonDocument v;
-            v.set(kModes[c.value & 3]);
-            put_value(c.device_id, "repeat", "repeat", v.as<JsonVariantConst>());
-            break;
-        }
+        case Type::Play:     report(ctl().play(c.device_id), c.device_id); break;
+        case Type::Pause:    report(ctl().pause(c.device_id), c.device_id); break;
+        case Type::Next:     report(ctl().next(c.device_id), c.device_id); break;
+        case Type::Previous: report(ctl().previous(c.device_id), c.device_id); break;
+        case Type::Mute:     report(ctl().setMute(c.device_id, c.value), c.device_id); break;
+        case Type::Shuffle:  report(ctl().setShuffle(c.device_id, c.value), c.device_id); break;
+        case Type::Like:     report(ctl().setLike(c.device_id, c.value), c.device_id); break;
+        case Type::Power:    report(ctl().setPower(c.device_id, c.value), c.device_id); break;
+        case Type::Repeat:   report(ctl().setRepeat(c.device_id, (Repeat)(c.value & 3)), c.device_id); break;
         case Type::SelectDevice: {
             int i = model.index_of(c.device_id);
             if (i < 0 || i == model.current_index()) break;
@@ -509,19 +484,15 @@ static void run(const Command &c) {
         case Type::LoadSource:  load_source(c.device_id); break;
         case Type::LoadQueue:   load_queue(c.device_id); break;
         case Type::ActivateSource: {
-            JsonDocument body, res;
-            body["source_id"] = c.text;
-            if (report(api::post(device_path(c.device_id, "sources/activate").c_str(), body, res), c.device_id, res))
-                load_details(c.device_id);
+            if (report(ctl().activateSource(c.device_id, c.text), c.device_id)) load_details(c.device_id);
             break;
         }
         case Type::PlayRadio: {
             // -1 = whatever device is current (the library's Radio tab)
             int device_id = c.device_id >= 0 ? c.device_id : (model.device() ? model.device()->id : -1);
             if (device_id < 0) break;
-            JsonDocument body, res;
-            String path = device_path(device_id, "radio/") + c.value;
-            if (report(api::post(path.c_str(), body, res), device_id, res)) {
+            JsonDocument res;
+            if (report(ctl().playRadio(device_id, c.value, res), device_id, res)) {
                 String msg = String("Playing ") + (res["station"] | "radio");
                 ui::toast(msg.c_str());
             }
@@ -544,18 +515,8 @@ static void run(const Command &c) {
         }
         case Type::LoadLibrary:    load_library((ui::LibView)c.value, c.text); break;
         case Type::LoadSearch:     load_search(c.text); break;
-        case Type::Seek: {
-            JsonDocument v;
-            v.set(c.value);
-            put_value(c.device_id, "seek", "position", v.as<JsonVariantConst>());
-            break;
-        }
-        case Type::QueueJump: {
-            JsonDocument body, res;
-            body["position"] = c.value;
-            report(api::post(device_path(c.device_id, "queue/jump").c_str(), body, res), c.device_id, res);
-            break;
-        }
+        case Type::Seek:      report(ctl().seek(c.device_id, c.value), c.device_id); break;
+        case Type::QueueJump: report(ctl().queueJump(c.device_id, c.value), c.device_id); break;
         case Type::LoadArtist:     load_artist(c.value); break;
         case Type::LoadAlbum:      load_album(c.value); break;
         case Type::LoadPlaylist:   load_playlist(c.value); break;
@@ -583,9 +544,7 @@ void loop() {
     if (value < 0) return;
 
     last_volume_ms = now;
-    JsonDocument v;
-    v.set(value);
-    put_value(device, "volume", "volume", v.as<JsonVariantConst>());
+    report(ctl().setVolume(device, value), device);
 }
 
 }  // namespace commands
