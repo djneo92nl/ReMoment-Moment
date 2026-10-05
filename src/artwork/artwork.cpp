@@ -9,7 +9,7 @@
 #include "cache.h"
 #include "model.h"
 #include "net/api.h"
-#include "net/registration.h"
+#include "net/player.h"
 #include "ui/ui.h"
 
 namespace artwork {
@@ -246,7 +246,7 @@ static bool precache_page() {
     }
     if (cache::nearly_full(cache::Kind::Cover)) return false;
 
-    String token = registration::api_token();
+    String token = player::client().apiToken();
     if (token.isEmpty()) return false;
 
     String path = "/clients/" + token + "/artwork";

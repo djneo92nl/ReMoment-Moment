@@ -1,17 +1,27 @@
-// MQTT connection and live state for all assigned devices.
+// The ReMoment library client (discovery, registration, MQTT, live device state) and the
+// bridge from its events to the screens, artwork and status LED.
 #pragma once
+
+#include <ReMoment.h>
 
 namespace player {
 
+// The library client. Loop task only (its state is not thread-safe).
+remoment::Client &client();
+
 void begin();
 
-// Keeps MQTT connected and detects "not playing". Call every loop().
+// Drives discovery, registration, MQTT and heartbeats. Call every loop().
 void loop();
 
-// Call after the assigned device list changed: resubscribes and refreshes the device list screen.
-void devices_changed();
-
-// Call after model.current_device changed: re-renders Now Playing for the new device.
+// Call after model.current device changed outside the library: re-renders Now Playing.
 void device_changed();
+
+// True once the first device list arrived (the Now Playing screen may be shown)
+bool has_devices();
+
+// Re-run discovery / forget the registration and pair again
+void restart();
+void forget_registration();
 
 }  // namespace player

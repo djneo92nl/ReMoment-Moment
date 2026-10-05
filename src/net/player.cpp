@@ -1,10 +1,10 @@
 #include "player.h"
 
-#include <ArduinoJson.h>
-#include <PubSubClient.h>
 #include <WiFi.h>
 #include <garnet_web.h>
 
+#include "app_config.h"
+#include "app_settings.h"
 #include "artwork/artwork.h"
 #include "board/board.h"
 #include "model.h"
@@ -12,38 +12,24 @@
 
 namespace player {
 
-static const unsigned long kMqttReconnectIntervalMs = 10000;
+static remoment::Client             rm;
+static remoment::PreferencesStorage storage("rm_reg");  // same keys the app always used
+static char                         server_url[96];
+static char                         chip_id[24];
+static char                         hostname[48];
+static char                         background_key[24];
 
-static WiFiClient   wifi_client;
-static PubSubClient mqtt(wifi_client);
-
-static unsigned long last_attempt_ms = 0;
-
-// Subscribed topic filter per device ("remoment/player/4/#"), to unsubscribe after a list change
-static char subscribed[kMaxDevices][sizeof(Device::mqtt_topic) + 2];
-static uint8_t subscribed_count = 0;
-
-// Latest artwork per device, so switching devices shows the right cover at once
-static artwork::Request device_artwork[kMaxDevices];
-
-// "#rrggbb" -> 0xRRGGBB
-static bool parse_hex_color(const char *s, uint32_t &out) {
-    if (!s || s[0] != '#' || strlen(s) != 7) return false;
-    char *end;
-    out = strtoul(s + 1, &end, 16);
-    return *end == '\0';
-}
+remoment::Client &client() { return rm; }
 
 // The LED wants a hue, not the readable-on-black safe colours (those are lightened and look
 // white on an LED). Take the most saturated raw palette colour at full brightness, with its
 // saturation pushed up: album palettes are often muted, and a pastel reads as white on an
 // LED. Grey palettes (hardly any hue) stay a soft white.
-static uint32_t led_color(JsonArrayConst colors) {
+static uint32_t led_color(const uint32_t *colors, uint8_t count) {
     uint32_t best = 0;
     float best_sat = -1;
-    for (const char *hex : colors) {
-        uint32_t c;
-        if (!parse_hex_color(hex, c)) continue;
+    for (uint8_t i = 0; i < count; i++) {
+        uint32_t c = colors[i];
         float r = ((c >> 16) & 0xFF) / 255.0f, g = ((c >> 8) & 0xFF) / 255.0f, b = (c & 0xFF) / 255.0f;
         float mx = max(r, max(g, b)), mn = min(r, min(g, b));
         float sat = mx > 0 ? (mx - mn) / mx : 0;
@@ -66,184 +52,149 @@ static uint32_t led_color(JsonArrayConst colors) {
     return channel(r) << 16 | channel(g) << 8 | channel(b);
 }
 
-static void parse_artwork(JsonObjectConst art, artwork::Request &req) {
-    req = {};
-    strlcpy(req.cover_url, art["proxy_320"] | "", sizeof(req.cover_url));
-    strlcpy(req.background_url, artwork::background_url(art), sizeof(req.background_url));
-    req.has_accent = parse_hex_color(art["safe_colors"][0] | "", req.accent);
-    req.led        = led_color(art["colors"]);
-    Serial.printf("[led] %06X\n", (unsigned)req.led);
-}
-
-static int8_t parse_tristate(JsonVariantConst v) { return v.isNull() ? -1 : (v.as<bool>() ? 1 : 0); }
-
-static Repeat parse_repeat(const char *s) {
-    if (!s) return Repeat::Unknown;
-    if (strcmp(s, "off") == 0) return Repeat::Off;
-    if (strcmp(s, "all") == 0) return Repeat::All;
-    if (strcmp(s, "one") == 0) return Repeat::One;
-    return Repeat::Unknown;
-}
-
-static PlayState parse_state(const char *s) {
-    if (!s) return PlayState::Unknown;
-    if (strcmp(s, "playing") == 0) return PlayState::Playing;
-    if (strcmp(s, "paused") == 0) return PlayState::Paused;
-    if (strcmp(s, "standby") == 0) return PlayState::Standby;
-    if (strcmp(s, "unreachable") == 0) return PlayState::Unreachable;
-    return PlayState::Unknown;
+// What the artwork task needs for a device's current track
+static artwork::Request artwork_request(const Device &d) {
+    artwork::Request req = {};
+    strlcpy(req.cover_url, d.artwork.cover_url, sizeof(req.cover_url));
+    strlcpy(req.background_url, d.artwork.background_url, sizeof(req.background_url));
+    req.has_accent = d.artwork.has_accent;
+    req.accent     = d.artwork.accent;
+    req.led        = led_color(d.artwork.colors, d.artwork.color_count);
+    return req;
 }
 
 // Status LED: the current album's colour while something plays
 static void update_led() {
     const Device *d = model.device();
-    const artwork::Request *art = d ? &device_artwork[model.current_device] : nullptr;
-    board::set_led(d && d->active() ? art->led : 0);
+    board::set_led(d && d->active() ? led_color(d->artwork.colors, d->artwork.color_count) : 0);
 }
 
-// Pushes a device change to the screens that show it
-static void changed(int index, uint8_t what) {
-    const Device &d = model.devices[index];
-    if (index == model.current_device) {
-        ui::now_playing_update(d, what);
-        update_led();
-    }
-    ui::devices_update(index, d);
+static uint8_t ui_flags(uint8_t changes) {
+    uint8_t what = 0;
+    if (changes & remoment::kChangeTrack)    what |= ui::kUpdateTrack;
+    if (changes & remoment::kChangeProgress) what |= ui::kUpdateProgress;
+    if (changes & remoment::kChangeState)    what |= ui::kUpdateState;
+    if (changes & remoment::kChangeVolume)   what |= ui::kUpdateVolume;
+    if (changes & remoment::kChangeModes)    what |= ui::kUpdateModes;
+    return what;
 }
 
-static void clear_track(Device &d) {
-    d.track[0] = d.artist[0] = d.album[0] = '\0';
-    d.album_id = 0;
-    d.progress = 0;
-    d.duration = -1;
+static void sync_devices() {
+    // The UI keeps its own copy of the list: hand it the library's devices in order
+    ui::devices_sync(rm.device(0), rm.deviceCount(), rm.currentIndex());
 }
 
-static void on_message(char *topic, byte *payload, unsigned int length) {
-    // Find the device whose base topic prefixes this one
-    int index = -1;
-    const char *suffix = nullptr;
-    for (int i = 0; i < model.device_count; i++) {
-        size_t n = strlen(model.devices[i].mqtt_topic);
-        if (strncmp(topic, model.devices[i].mqtt_topic, n) == 0 && topic[n] == '/') {
-            index  = i;
-            suffix = topic + n + 1;
-            break;
+class Bridge : public remoment::Listener {
+    int last_device_id = -1;
+
+    void onPhase(remoment::Phase phase) override { model.phase = phase; }
+
+    void onDevicesChanged() override {
+        const Device *d = rm.current();
+        int id = d ? d->id : -1;
+        sync_devices();
+        if (id != last_device_id) {
+            last_device_id = id;
+            device_changed();
         }
     }
-    if (index < 0) return;
-    Device &d    = model.devices[index];
-    bool current = index == model.current_device;
 
-    if (strcmp(suffix, "progress") == 0) {
-        char value[8];
-        if (length >= sizeof(value)) return;
-        memcpy(value, payload, length);
-        value[length]  = '\0';
-        d.progress     = constrain(atoi(value), 0, 100);
-        if (current) ui::now_playing_update(d, ui::kUpdateProgress);
-        return;
-    }
+    void onDeviceChanged(uint8_t index, uint8_t changes) override {
+        const Device &d = *rm.device(index);
+        bool current = index == rm.currentIndex();
+        uint8_t what = ui_flags(changes);
 
-    if (strcmp(suffix, "data") == 0) {
-        // Empty (retained-clear) payload = nothing playing on this device
-        if (length == 0) {
-            clear_track(d);
-            device_artwork[index] = {};
-        } else {
-            JsonDocument doc;
-            if (deserializeJson(doc, payload, length)) return;
-            strlcpy(d.artist, doc["artist"] | "", sizeof(d.artist));
-            strlcpy(d.track, doc["track"] | "", sizeof(d.track));
-            strlcpy(d.album, doc["album"] | "", sizeof(d.album));
-            d.album_id = doc["album_id"] | 0;
-            d.duration = doc["duration"] | -1;
-            // No artwork object yet on the first play of a new cover (the server processes it async)
-            parse_artwork(doc["artwork"], device_artwork[index]);
+        // A cover change on the current device; a state change only clears the text, the cover stays
+        if (current && (changes & remoment::kChangeTrack) && !(changes & remoment::kChangeState))
+            artwork::request(artwork_request(d));
+
+        if (changes & (remoment::kChangeTrack | remoment::kChangeState)) {
+            if (current) {
+                ui::now_playing_update(d, what);
+                update_led();
+            }
+            ui::devices_update(index, d);
+        } else if (current) {
+            ui::now_playing_update(d, what);
         }
-        if (current) artwork::request(device_artwork[index]);
-        changed(index, ui::kUpdateTrack);
-        return;
     }
+} bridge;
 
-    JsonDocument doc;
-    if (deserializeJson(doc, payload, length)) return;
-
-    if (strcmp(suffix, "state") == 0) {
-        d.state = parse_state(doc["state"]);
-        if (!d.active()) clear_track(d);
-        changed(index, ui::kUpdateState | ui::kUpdateTrack);
-    } else if (strcmp(suffix, "volume") == 0) {
-        d.volume = doc["volume"] | d.volume;
-        d.muted  = doc["muted"] | d.muted;
-        if (current) ui::now_playing_update(d, ui::kUpdateVolume);
-    } else if (strcmp(suffix, "modes") == 0) {
-        d.shuffle = parse_tristate(doc["shuffle"]);
-        d.repeat  = parse_repeat(doc["repeat"]);
-        d.liked   = parse_tristate(doc["liked"]);
-        if (current) ui::now_playing_update(d, ui::kUpdateModes);
-    }
+static bool network_up() {
+    GwNetMode mode = gwNetMode();
+    return mode == GwNetMode::WiFi || mode == GwNetMode::Ethernet;
 }
 
-// Subscribes to everything of every assigned device (state and track feed the device list)
-static void resubscribe() {
-    if (!mqtt.connected()) return;
-    for (uint8_t i = 0; i < subscribed_count; i++) mqtt.unsubscribe(subscribed[i]);
-    subscribed_count = 0;
-    for (uint8_t i = 0; i < model.device_count; i++) {
-        snprintf(subscribed[i], sizeof(subscribed[i]), "%s/#", model.devices[i].mqtt_topic);
-        mqtt.subscribe(subscribed[i]);
-        subscribed_count++;
-    }
-}
-
-static void connect() {
-    if (mqtt.connected() || !model.mqtt_host[0]) return;
-    unsigned long now = millis();
-    if (last_attempt_ms != 0 && now - last_attempt_ms < kMqttReconnectIntervalMs) return;
-    last_attempt_ms = now;
-
-    mqtt.setServer(model.mqtt_host, model.mqtt_port);
-    String client_id = "remoment-client-" + gwChipId();
-    if (mqtt.connect(client_id.c_str())) {
-        Serial.println("[mqtt] connected");
-        subscribed_count = 0;
-        resubscribe();
-    } else {
-        Serial.printf("[mqtt] connect to %s:%u failed, rc=%d\n", model.mqtt_host, model.mqtt_port, mqtt.state());
-    }
-}
+static void load_server_url() { strlcpy(server_url, settings::server_url().c_str(), sizeof(server_url)); }
 
 void begin() {
-    mqtt.setCallback(on_message);
-    mqtt.setSocketTimeout(3);
-    mqtt.setBufferSize(2048);  // /data carries artwork URLs, colours, album and long titles
-}
+    strlcpy(chip_id, gwChipId().c_str(), sizeof(chip_id));
+    strlcpy(hostname, gwHostname().c_str(), sizeof(hostname));
+    snprintf(background_key, sizeof(background_key), "proxy_bg_%ux%u", board::info().width, board::info().height);
+    load_server_url();
 
-void devices_changed() {
-    resubscribe();
-    ui::devices_sync(model.devices, model.device_count, model.current_device);
+    remoment::Config cfg;
+    cfg.info.hardware_id      = chip_id;
+    cfg.info.board            = board::info().name;
+    cfg.info.hostname         = hostname;
+    cfg.info.firmware_version = FIRMWARE_VERSION;
+    cfg.info.build_number     = BUILD_NUMBER;
+    cfg.info.screen_w         = board::info().width;
+    cfg.info.screen_h         = board::info().height;
+    cfg.server_url            = server_url;
+    cfg.storage               = &storage;
+    cfg.listener              = &bridge;
+    cfg.network_up            = network_up;
+    cfg.background_key        = background_key;
+    rm.begin(cfg);
 }
 
 void device_changed() {
     const Device *d = model.device();
     if (d) {
         ui::now_playing_update(*d, ui::kUpdateAll);
-        artwork::request(device_artwork[model.current_device]);
+        artwork::request(artwork_request(*d));
     } else {
         artwork::clear();
     }
-    ui::devices_sync(model.devices, model.device_count, model.current_device);
+    sync_devices();
     update_led();
 }
 
+bool has_devices() { return rm.deviceCount() > 0; }
+
+void restart() {
+    load_server_url();
+    rm.restart();
+}
+
+void forget_registration() {
+    load_server_url();
+    rm.forgetRegistration();
+}
+
 void loop() {
-    if (WiFi.status() != WL_CONNECTED) {
-        model.mqtt_connected = false;
-        return;
-    }
-    connect();
-    mqtt.loop();
-    model.mqtt_connected = mqtt.connected();
+    rm.loop();
+
+    // Mirror what the settings page, the artwork cache and the status screens read
+    const remoment::protocol::ServerInfo &info = rm.server();
+    strlcpy(model.server_url, rm.http().server(), sizeof(model.server_url));
+    strlcpy(model.mqtt_host, info.mqtt_host, sizeof(model.mqtt_host));
+    model.mqtt_port = info.mqtt_port;
+    strlcpy(model.artwork_base_url, info.artwork_base_url, sizeof(model.artwork_base_url));
+    strlcpy(model.placeholder_url, info.placeholder_url, sizeof(model.placeholder_url));
+    strlcpy(model.pairing_code, rm.pairingCode(), sizeof(model.pairing_code));
+    model.server_ok      = rm.serverReachable();
+    model.mqtt_connected = rm.mqttConnected();
 }
 
 }  // namespace player
+
+// ---- Model accessors over the library's device list ----------------------------------
+
+uint8_t Model::device_count() const { return player::client().deviceCount(); }
+Device *Model::device() { return player::client().current(); }
+const Device *Model::device() const { return player::client().current(); }
+Device *Model::device_at(uint8_t index) { return player::client().device(index); }
+int Model::current_index() const { return player::client().currentIndex(); }
+int Model::index_of(int device_id) const { return player::client().indexOf(device_id); }

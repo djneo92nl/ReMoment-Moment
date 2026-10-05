@@ -10,7 +10,6 @@
 namespace settings {
 
 static const char *kServerGroup = "remoment";
-static const char *kRegNamespace = "rm_reg";  // raw Preferences, hidden from the web UI
 
 static volatile bool rediscover_requested = false;
 
@@ -18,8 +17,10 @@ static volatile bool rediscover_requested = false;
 static void request_rediscover() { rediscover_requested = true; }
 static void on_server_changed(const GsField &) { rediscover_requested = true; }
 
+static volatile bool forget_requested = false;
+
 static void forget_registration() {
-    clear_registration();
+    forget_requested     = true;
     rediscover_requested = true;
 }
 
@@ -141,7 +142,7 @@ static String device_str() {
     const Device *d = model.device();
     return d ? String(d->name) + " (#" + d->id + ")" : String("-");
 }
-static String devices_str() { return String(model.device_count); }
+static String devices_str() { return String(model.device_count()); }
 static String track_str() {
     const Device *d = model.device();
     if (!d || !d->active()) return "Not playing";
@@ -186,49 +187,15 @@ int calm_after_s() { return calm_seconds; }
 
 String server_url() { return gsGetString(kServerGroup, "url"); }
 
-// ---- Registration storage ----------------------------------------------------
-
-static String reg_get(const char *key) {
-    if (!gsNamespaceExists(kRegNamespace)) return "";
-    Preferences prefs;
-    prefs.begin(kRegNamespace, true);
-    String v = prefs.getString(key, "");
-    prefs.end();
-    return v;
-}
-
-String registration_token() { return reg_get("reg"); }
-String api_token() { return reg_get("api"); }
-
-void set_registration(const String &registration_token, const String &api_token) {
-    Preferences prefs;
-    prefs.begin(kRegNamespace, false);
-    prefs.putString("reg", registration_token);
-    prefs.putString("api", api_token);
-    prefs.end();
-}
-
-void clear_registration() { set_registration("", ""); }
-
-int last_device_id() {
-    if (!gsNamespaceExists(kRegNamespace)) return -1;
-    Preferences prefs;
-    prefs.begin(kRegNamespace, true);
-    int id = prefs.getInt("device", -1);
-    prefs.end();
-    return id;
-}
-
-void set_last_device_id(int id) {
-    Preferences prefs;
-    prefs.begin(kRegNamespace, false);
-    prefs.putInt("device", id);
-    prefs.end();
-}
-
 String web_password_hint() {
     if (gsNamespaceExists("gw_auth")) return "the one you set";
     return WEB_DEFAULT_PASSWORD;
+}
+
+bool take_forget_request() {
+    bool requested = forget_requested;
+    forget_requested = false;
+    return requested;
 }
 
 bool take_rediscover_request() {

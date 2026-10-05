@@ -15,20 +15,15 @@
 #include "model.h"
 #include "net/commands.h"
 #include "net/player.h"
-#include "net/registration.h"
-#include "net/server.h"
 #include "app_settings.h"
 #include "battery.h"
 #include "ui/ui.h"
 
 Model model;
 
-static const unsigned long kDiscoverIntervalMs       = 10000;
-static const unsigned long kDeviceRefreshIntervalMs  = 5UL * 60 * 1000;
 static const unsigned long kBatterySampleIntervalMs  = 5000;
 
-static unsigned long last_discover_ms       = 0;
-static unsigned long last_device_refresh_ms = 0;
+static bool          now_playing_shown = false;
 static unsigned long last_battery_ms        = 0;
 
 // Only touch the status screen when its text actually changes
@@ -45,21 +40,10 @@ static bool network_up() {
     return mode == GwNetMode::WiFi || mode == GwNetMode::Ethernet;
 }
 
-static void enter_running() {
-    model.phase = Phase::Running;
-    last_device_refresh_ms = millis();
-    player::devices_changed();
-    player::device_changed();
-    ui::show_now_playing();
-}
-
 static void restart_flow() {
-    registration::reset();
-    model.server_url[0] = '\0';
-    model.mqtt_host[0]  = '\0';
-    model.phase         = Phase::Network;
-    last_discover_ms    = 0;
-    player::devices_changed();
+    now_playing_shown = false;
+    if (settings::take_forget_request()) player::forget_registration();
+    else player::restart();
     player::device_changed();
 }
 
@@ -78,10 +62,6 @@ static void log_network() {
 }
 
 static void step_network() {
-    if (network_up()) {
-        model.phase = Phase::Discovering;
-        return;
-    }
     if (gwPortalActive()) {
         String detail = "Then open http://" + gwNetIP().toString() + " to choose your network";
         // Someone joined the setup network: they'll need the password next
@@ -99,37 +79,25 @@ static void step_discovering() {
     String detail = url.isEmpty() ? String("Searching the network") : url;
     detail += "\nSettings: http://" + gwNetIP().toString() + " - " + web_password_hint();
     status("Looking for the ReMoment server", detail.c_str());
-
-    unsigned long now = millis();
-    if (last_discover_ms != 0 && now - last_discover_ms < kDiscoverIntervalMs) return;
-    last_discover_ms = now;
-    if (server::discover()) model.phase = Phase::Registering;
 }
 
 static void step_registering() {
-    switch (registration::step()) {
-        case registration::Result::Approved:
-            if (model.device_count > 0) {
-                enter_running();
-            } else {
-                status("No devices assigned", "Assign devices to this screen in the ReMoment admin");
-            }
-            break;
-        case registration::Result::Pending: {
-            String detail = "Approve this screen in ReMoment under Settings > Clients (" + String(model.server_url) + ")";
-            // Older servers have no pairing code: the chip id is what the admin list shows
-            String code = model.pairing_code[0] ? String(model.pairing_code) : gwChipId();
-            status("Waiting for approval", detail.c_str(), code.c_str());
-            break;
-        }
-        case registration::Result::Failed:
-            status("Registering with the server", model.server_ok ? nullptr : "Server not reachable, retrying");
-            break;
+    if (model.pairing_code[0]) {
+        String detail = "Approve this screen in ReMoment under Settings > Clients (" + String(model.server_url) + ")";
+        status("Waiting for approval", detail.c_str(), model.pairing_code);
+    } else {
+        status("Registering with the server", model.server_ok ? nullptr : "Server not reachable, retrying");
     }
 }
 
 static void step_running() {
-    player::loop();
+    if (!player::has_devices()) {
+        status("No devices assigned", "Assign devices to this screen in the ReMoment admin");
+        now_playing_shown = false;
+    } else if (!now_playing_shown) {
+        now_playing_shown = true;
+        ui::show_now_playing();
+    }
     commands::loop();
     settings::save_if_settled();
 
@@ -137,18 +105,6 @@ static void step_running() {
     if (millis() - last_idle_check_ms > 1000) {
         last_idle_check_ms = millis();
         ui::idle_check(model.device());
-    }
-    registration::heartbeat_loop();
-
-    unsigned long now = millis();
-    if (now - last_device_refresh_ms > kDeviceRefreshIntervalMs) {
-        last_device_refresh_ms = now;
-        int before = model.device() ? model.device()->id : -1;
-        if (registration::refresh_devices()) {
-            int after = model.device() ? model.device()->id : -1;
-            player::devices_changed();
-            if (after != before) player::device_changed();
-        }
     }
 }
 
@@ -219,6 +175,7 @@ void loop() {
     log_network();
 
     if (settings::take_rediscover_request()) restart_flow();
+    player::loop();
 
     switch (model.phase) {
         case Phase::Network:     step_network(); break;

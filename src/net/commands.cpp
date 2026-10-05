@@ -47,7 +47,7 @@ static String device_path(int device_id, const char *suffix) {
 
 static const char *device_name(int device_id) {
     int i = model.index_of(device_id);
-    return i >= 0 ? model.devices[i].name : "the device";
+    return i >= 0 ? model.device_at(i)->name : "the device";
 }
 
 // Turns an API failure into a short message for the toast
@@ -135,7 +135,7 @@ static const int kMaxOptions = 32;
 static void load_details(int device_id) {
     int i = model.index_of(device_id);
     if (i < 0) return;
-    const Device &d = model.devices[i];
+    const Device &d = *model.device_at(i);
     static ui::Option options[kMaxOptions];
 
     if (d.has(kCapSourceActivation)) {
@@ -500,9 +500,8 @@ static void run(const Command &c) {
         }
         case Type::SelectDevice: {
             int i = model.index_of(c.device_id);
-            if (i < 0 || i == model.current_device) break;
-            model.current_device = i;
-            settings::set_last_device_id(c.device_id);
+            if (i < 0 || i == model.current_index()) break;
+            player::client().select(c.device_id);  // remembers it; the bridge refreshes the screens
             player::device_changed();
             break;
         }
