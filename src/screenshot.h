@@ -5,5 +5,8 @@
 #pragma once
 
 namespace screenshot {
+// Switches screen by letter (n/v/q/d/e/l/s as above); returns false for an unknown letter or a screen the
+// device can't show. Takes the LVGL lock itself.
+bool navigate(char screen);
 void poll();  // call from loop(); cheap when nothing was requested
 }

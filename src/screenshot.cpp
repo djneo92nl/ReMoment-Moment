@@ -47,12 +47,12 @@ static void dump() {
     heap_caps_free(buf);
 }
 
-// Switches screen so tools/screenshots.py can walk through the UI. Replies "RMNAV <letter> ok|unknown".
-static void navigate(char screen) {
+// Also behind the buttons in the web UI. Replies "RMNAV <letter> ok|unknown" on serial for tools/screenshots.py.
+bool navigate(char screen) {
     bool ok = true;
     {
         LvglLock lock;
-        if (!lock) return;
+        if (!lock) return false;
         switch (screen) {
             case 'n': ui::nav::to_now_playing(); break;
             case 'v': ui::nav::to_volume(); break;
@@ -68,6 +68,7 @@ static void navigate(char screen) {
         }
     }
     Serial.printf("RMNAV %c %s\n", screen, ok ? "ok" : "unknown");
+    return ok;
 }
 
 void poll() {

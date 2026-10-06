@@ -6,6 +6,7 @@
 #include "app_config.h"
 #include "board/board.h"
 #include "model.h"
+#include "screenshot.h"
 
 namespace settings {
 
@@ -169,9 +170,30 @@ static const GsField kStatusFields[] = {
     gsInfo("sd", "SD card", sd_str),
 };
 
+// ---- Screens (debug / marketing shots) ----------------------------------------------
+
+static void show_now_playing() { screenshot::navigate('n'); }
+static void show_volume()      { screenshot::navigate('v'); }
+static void show_queue()       { screenshot::navigate('q'); }
+static void show_devices()     { screenshot::navigate('d'); }
+static void show_details()     { screenshot::navigate('e'); }
+static void show_library()     { screenshot::navigate('l'); }
+static void show_settings()    { screenshot::navigate('s'); }
+
+static const GsField kScreenFields[] = {
+    gsButton("now", "Now playing", show_now_playing),
+    gsButton("volume", "Volume", show_volume),
+    gsButton("queue", "Queue", show_queue),
+    gsButton("devices", "Devices", show_devices),
+    gsButton("details", "Device details", show_details),
+    gsButton("library", "Library", show_library),
+    gsButton("settings", "Settings", show_settings),
+};
+
 static const GsGroup kServerGroupDef = gsGroup(kServerGroup, "Server", "server", kServerFields, "ReMoment");
 static const GsGroup kDisplayGroupDef = gsGroup(kDisplayGroup, "Display", "display", kDisplayFields, "ReMoment");
 static const GsGroup kSoundGroupDef  = gsGroup(kSoundGroup, "Sound", "sound", kSoundFields, "ReMoment");
+static const GsGroup kScreenGroupDef = gsGroup("rm_screens", "Screens", "display", kScreenFields, "ReMoment");
 static const GsGroup kStatusGroupDef = gsGroup("rm_status", "Status", "info", kStatusFields, "ReMoment");
 
 void register_groups() {
@@ -179,6 +201,7 @@ void register_groups() {
     gsRegister(kServerGroupDef);
     gsRegister(kDisplayGroupDef);
     gsRegister(kSoundGroupDef);
+    gsRegister(kScreenGroupDef);
     apply_display();
     board::set_click_volume(gsGetInt(kSoundGroup, "click"));
 }
