@@ -5,10 +5,13 @@
 #include <lvgl.h>
 
 #include "board/board.h"
+#include "model.h"
+#include "ui/nav.h"
 
 namespace screenshot {
 
 static constexpr uint8_t  kTrigger  = 0xA5;
+static constexpr uint8_t  kNavigate = 0xA6;  // followed by a screen letter, see navigate()
 static constexpr uint32_t kDumpBaud = 921600;
 static constexpr uint32_t kBaud     = 115200;
 
@@ -44,9 +47,38 @@ static void dump() {
     heap_caps_free(buf);
 }
 
+// Switches screen so tools/screenshots.py can walk through the UI. Replies "RMNAV <letter> ok|unknown".
+static void navigate(char screen) {
+    bool ok = true;
+    {
+        LvglLock lock;
+        if (!lock) return;
+        switch (screen) {
+            case 'n': ui::nav::to_now_playing(); break;
+            case 'v': ui::nav::to_volume(); break;
+            case 'q': ui::nav::to_queue(); break;
+            case 'd': ui::nav::to_devices(); break;
+            case 'e':
+                if (const Device *device = model.device()) ui::nav::to_details(device->id);
+                else ok = false;
+                break;
+            case 'l': ui::nav::to_library(); break;
+            case 's': ui::nav::to_settings(); break;
+            default:  ok = false;
+        }
+    }
+    Serial.printf("RMNAV %c %s\n", screen, ok ? "ok" : "unknown");
+}
+
 void poll() {
     while (Serial.available()) {
-        if ((uint8_t)Serial.read() == kTrigger) dump();
+        const uint8_t byte = Serial.read();
+        if (byte == kTrigger) dump();
+        else if (byte == kNavigate) {
+            const unsigned long start = millis();
+            while (!Serial.available() && millis() - start < 100) delay(1);
+            if (Serial.available()) navigate((char)Serial.read());
+        }
     }
 }
 
