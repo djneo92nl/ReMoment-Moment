@@ -5,6 +5,7 @@
  * -> register and wait for approval -> assigned devices -> MQTT now playing.
  */
 #include <Arduino.h>
+#include "screenshot.h"
 #include "sd_card.h"
 #include <WiFi.h>
 #include <garnet_web.h>
@@ -172,6 +173,7 @@ void setup() {
 
 void loop() {
     gwLoop();
+    screenshot::poll();
     log_network();
 
     if (settings::take_rediscover_request()) restart_flow();
