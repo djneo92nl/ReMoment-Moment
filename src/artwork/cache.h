@@ -1,6 +1,6 @@
 // SD card cache for server artwork, stored as the server's JPEG files:
 //   /remoment/covers/{hash}.jpg       (artwork.proxy_320)
-//   /remoment/backgrounds/{hash}.jpg  (artwork.proxy_bg, this screen's size)
+//   /remoment/backgrounds/{w}x{h}/{hash}.jpg  (artwork.proxy_bg_{w}x{h}, one folder per screen size)
 //   /remoment/thumbs/{hash}.jpg       (proxy_120, library grids and lists)
 // {hash} is the md5 directory the server uses (/storage/artwork/{hash}/320.jpg).
 // Last-use counters for LRU eviction are kept in memory and saved to /remoment/.lru/{kind}.idx.
@@ -16,7 +16,7 @@ enum class Kind : uint8_t { Cover, Background, Thumb };
 // Creates the cache folders and counts entries. Returns false without an SD card.
 bool begin();
 
-// SD path (for SD_MMC.open) of the cached file for `url`, downloading it when missing.
+// SD path (for RM_SD.open) of the cached file for `url`, downloading it when missing.
 // Returns "" when the download failed. `touch` marks it as just used (LRU); pre-cached
 // files aren't touched, so they're evicted before anything that was actually shown.
 String fetch(Kind kind, const char *url, bool touch = true);

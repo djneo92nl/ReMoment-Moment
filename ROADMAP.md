@@ -123,6 +123,15 @@ Board: ES3C28P (ST77922 320×480 QSPI panel, custom-protocol touch at I2C `0x55`
 - [x] **[S] Artwork sizes per client** — `proxy_bg_320x480` next to `proxy_bg`; clients pick `proxy_bg_{w}x{h}`, SD export per size (`artwork:export-sd --size=320x480`)
 - [x] **[C] RGB LED status** — the album's main safe colour while playing, off otherwise (play state / connection signalling still open)
 - [ ] **[C] Touch/click sounds** through the ES8311 speaker — *parked*: code, tick trigger and "Sound" setting are in; codec configures and reads back fine, but no audible output yet (see `src/board/es3c28p_audio.cpp`)
+
+Board: Guition ESP32-4848S040 (4" 480×480, ST7701 RGB with bit-banged 3-wire SPI init, GT911 without reset/INT, PWM backlight on GPIO38, no battery). Pins and init table from Arduino_GFX (`ESP32_4848S040_86BOX_GUITION`).
+
+- [x] **[C] PlatformIO env + board definition** (`ESP32-4848S040`), builds
+- [x] **[C] Verified on hardware** — panel (12 MHz pclk), GT911 at 0x5D, backlight
+- [x] **[C] Touch** — GT911 point record starts with a track-id byte
+- [x] **[C] Square layout** — 480×480 currently takes the portrait branch in `ui/layout.h`; review all screens
+- [x] **[S] `proxy_bg_480x480`** artwork size on the server
+- [x] **[C] SD card** — SPI mode only (`RM_SD` = `SD` on this board, `SD_MMC` elsewhere, see `src/sd_card.h`); the panel's CS (GPIO 39) must be held high because the bus is shared
 - [ ] **[C] Battery** — confirm the divider ratio on real hardware (unverified in MeetMicRec)
 
 ## Later

@@ -1,7 +1,8 @@
 #include "cache.h"
 
 #include <HTTPClient.h>
-#include <SD_MMC.h>
+#include "sd_card.h"
+#include "board/board.h"
 #include <WiFi.h>
 
 #include "model.h"
@@ -36,7 +37,7 @@ struct Folder {
 
 static Folder folders[] = {
     {"/remoment/covers", "/remoment/.lru/covers.idx", 3000, nullptr, 0, false},
-    {"/remoment/backgrounds", "/remoment/.lru/backgrounds.idx", 1000, nullptr, 0, false},
+    {nullptr, nullptr, 1000, nullptr, 0, false},  // backgrounds: paths include the screen size, set in begin()
     {"/remoment/thumbs", "/remoment/.lru/thumbs.idx", 5000, nullptr, 0, false},
 };
 
@@ -96,7 +97,7 @@ static int compare_hash(const void *a, const void *b) {
 
 // ---- Loading and saving --------------------------------------------------------------
 
-static bool ensure_dir(const char *dir) { return SD_MMC.exists(dir) || SD_MMC.mkdir(dir); }
+static bool ensure_dir(const char *dir) { return RM_SD.exists(dir) || RM_SD.mkdir(dir); }
 
 // Every JPEG on the card gets an entry; the index file then supplies last-use numbers
 static void load(Folder &fo) {
@@ -106,7 +107,7 @@ static void load(Folder &fo) {
 
     // Names only: openNextFile() opens each file, and FAT looks it up by walking the whole
     // directory, so a scan of a few thousand covers took minutes
-    File d = SD_MMC.open(fo.dir);
+    File d = RM_SD.open(fo.dir);
     bool is_dir = false;
     for (String path = d.getNextFileName(&is_dir); path.length() && fo.count < fo.max_files + kEvictBatch;
          path = d.getNextFileName(&is_dir)) {
@@ -118,7 +119,7 @@ static void load(Folder &fo) {
     d.close();
     qsort(fo.entries, fo.count, sizeof(Entry), compare_hash);
 
-    File idx = SD_MMC.open(fo.index, FILE_READ);
+    File idx = RM_SD.open(fo.index, FILE_READ);
     if (!idx) return;
     while (idx.available()) {
         String line = idx.readStringUntil('\n');
@@ -141,7 +142,7 @@ static void save(Folder &fo) {
         if (fo.entries[i].used == 0) continue;
         len += snprintf(buf + len, cap - len, "%s %u\n", fo.entries[i].hash, (unsigned)fo.entries[i].used);
     }
-    File f = SD_MMC.open(fo.index, FILE_WRITE);
+    File f = RM_SD.open(fo.index, FILE_WRITE);
     if (f) {
         f.write((const uint8_t *)buf, len);
         f.close();
@@ -167,12 +168,12 @@ static void evict(Folder &fo) {
     uint32_t n = min(kEvictBatch, fo.count);
     for (uint32_t i = 0; i < n; i++) {
         String path = String(fo.dir) + "/" + by_use[i].hash + ".jpg";
-        File f = SD_MMC.open(path, FILE_READ);
+        File f = RM_SD.open(path, FILE_READ);
         if (f) {
             free_bytes += f.size();
             f.close();
         }
-        SD_MMC.remove(path);
+        RM_SD.remove(path);
         remove_entry(fo, by_use[i].hash);
     }
     free(by_use);
@@ -252,10 +253,10 @@ static bool download(const String &url, const String &path) {
 
     bool ok = buf && len > 0 && (expected < 0 || len == (size_t)expected);
     if (ok) {
-        File f = SD_MMC.open(path, FILE_WRITE);
+        File f = RM_SD.open(path, FILE_WRITE);
         ok = f && f.write(buf, len) == len;
         if (f) f.close();
-        if (!ok) SD_MMC.remove(path);
+        if (!ok) RM_SD.remove(path);
         else free_bytes -= len;
     }
     if (!ok) Serial.printf("[artwork] download %s failed (%u of %d bytes)\n", url.c_str(), (unsigned)len, expected);
@@ -265,9 +266,19 @@ static bool download(const String &url, const String &path) {
 
 // ---------------------------------------------------------------------------------
 
+// Backgrounds are rendered per screen size and share the server's hash, so a card moved between
+// boards (or a size added later) must not hand one size to the other
+static char background_dir[48], background_index[48];
+
 bool begin() {
-    if (!ensure_dir(kBase) || !ensure_dir("/remoment/.lru")) return false;
-    free_bytes = (int64_t)(SD_MMC.totalBytes() - SD_MMC.usedBytes());
+    if (!ensure_dir(kBase) || !ensure_dir("/remoment/.lru") || !ensure_dir("/remoment/backgrounds")) return false;
+    snprintf(background_dir, sizeof(background_dir), "/remoment/backgrounds/%ux%u", board::info().width,
+             board::info().height);
+    snprintf(background_index, sizeof(background_index), "/remoment/.lru/backgrounds_%ux%u.idx", board::info().width,
+             board::info().height);
+    folder(Kind::Background).dir   = background_dir;
+    folder(Kind::Background).index = background_index;
+    free_bytes = (int64_t)(RM_SD.totalBytes() - RM_SD.usedBytes());
     for (Folder &fo : folders) {
         if (!ensure_dir(fo.dir)) return false;
         load(fo);
@@ -302,7 +313,7 @@ void forget(Kind kind, const String &path) {
     Folder &fo = folder(kind);
     int slash  = path.lastIndexOf('/');
     String hash = path.substring(slash + 1, path.length() - 4);
-    SD_MMC.remove(path);
+    RM_SD.remove(path);
     remove_entry(fo, hash.c_str());
     fo.dirty = true;
 }

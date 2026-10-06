@@ -100,8 +100,13 @@ static void show_bar(bool animate) {
     }
 }
 
+static void on_gesture(lv_dir_t dir);
+
 // /progress is a percentage (1% of a 4 minute track is 2.4 s): count seconds locally
 static bool seeking = false;  // a finger is on the bar: it shows where it would seek to
+static bool seek_cancelled = false;  // the finger went up/down instead of along: a swipe, not a seek
+static lv_point_t seek_origin;
+static int        seek_start_elapsed;
 
 static void tick_elapsed(lv_timer_t *) {
     if (seeking || shown.state != PlayState::Playing || shown.duration <= 0 || shown.elapsed >= shown.duration) return;
@@ -123,6 +128,24 @@ static void on_bar(lv_event_t *e) {
     if (code == LV_EVENT_PRESSED || code == LV_EVENT_PRESSING) {
         lv_point_t p;
         lv_indev_get_point(lv_indev_get_act(), &p);
+        if (code == LV_EVENT_PRESSED) {
+            seek_cancelled     = false;
+            seek_origin        = p;
+            seek_start_elapsed = shown.elapsed;
+        }
+        // A swipe up to the devices starts on the bar too: once the finger moves mostly vertically,
+        // put the position back and leave the gesture to the screen
+        if (!seek_cancelled && LV_ABS(p.y - seek_origin.y) > layout.btn / 2 &&
+            LV_ABS(p.y - seek_origin.y) > LV_ABS(p.x - seek_origin.x)) {
+            seek_cancelled = true;
+            seeking        = false;
+            shown.elapsed  = seek_start_elapsed;
+            show_times();
+            show_bar(false);
+            // The bar doesn't pass gestures on (a drag along it is a seek), so hand this one over
+            on_gesture(p.y < seek_origin.y ? LV_DIR_TOP : LV_DIR_BOTTOM);
+        }
+        if (seek_cancelled) return;
         lv_area_t a;
         lv_obj_get_coords(progress_bar, &a);
         int w   = LV_MAX(lv_area_get_width(&a), 1);
@@ -131,7 +154,7 @@ static void on_bar(lv_event_t *e) {
         shown.elapsed = (int)((int64_t)x * shown.duration / w);
         show_times();
         show_bar(false);
-    } else if (code == LV_EVENT_RELEASED && seeking) {
+    } else if (code == LV_EVENT_RELEASED && seeking && !seek_cancelled) {
         seeking = false;
         commands::post(commands::Type::Seek, shown.id, shown.elapsed);
     }

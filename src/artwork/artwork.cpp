@@ -2,7 +2,7 @@
 
 #include <Arduino.h>
 #include <JPEGDEC.h>
-#include <SD_MMC.h>
+#include "sd_card.h"
 #include <lvgl.h>
 
 #include "board/board.h"
@@ -47,7 +47,7 @@ static int on_draw(JPEGDRAW *draw) {
 }
 
 static uint8_t *read_file(const String &path, size_t &size) {
-    File f = SD_MMC.open(path, FILE_READ);
+    File f = RM_SD.open(path, FILE_READ);
     if (!f) return nullptr;
     size = f.size();
     uint8_t *data = size > 0 && size <= kMaxFileBytes ? (uint8_t *)ps_malloc(size) : nullptr;

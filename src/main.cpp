@@ -5,7 +5,7 @@
  * -> register and wait for approval -> assigned devices -> MQTT now playing.
  */
 #include <Arduino.h>
-#include <SD_MMC.h>
+#include "sd_card.h"
 #include <WiFi.h>
 #include <garnet_web.h>
 
@@ -147,8 +147,8 @@ void setup() {
 
     settings::register_groups();
     if (model.sd_available) {
-        gwSetSd(SD_MMC);
-        gwAddFs("sd", "SD Card", SD_MMC);
+        gwSetSd(RM_SD);
+        gwAddFs("sd", "SD Card", RM_SD);
     }
 
     GwConfig cfg;

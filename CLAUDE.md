@@ -29,6 +29,8 @@ The plan and its order live in `ROADMAP.md`. Currently implemented: WiFi setup a
 # Build
 pio run -e ESP32-S3-Touch-LCD-7B
 
+# Other boards: -e ES3C28P (3.5"), -e ESP32-4848S040 (Guition 4" 480x480, ST7701 + GT911, pins from Arduino_GFX/ESPHome, not yet verified on hardware)
+
 # Flash to device
 pio run --target upload -e ESP32-S3-Touch-LCD-7B
 
@@ -52,7 +54,7 @@ Application:   src/main.cpp (boot flow state machine), src/app_settings.* (named
 Network:       src/net/  — api (HTTP JSON), server (mDNS discovery + /api/info), registration, player (MQTT, all assigned devices), commands (UI actions -> REST)
 Artwork:       src/artwork/ — own FreeRTOS task (core 0), priorities: now-playing art > library thumbnails (/remoment/thumbs/) > idle pre-cache; SD cache (/remoment/covers/{hash}.jpg, /remoment/backgrounds/{hash}.jpg, last-use index in PSRAM, saved to /remoment/.lru/*.idx when idle — small SD writes cost ~0.8 s each) + JPEGDEC decode into double-buffered PSRAM images
 UI:            src/ui/   — ui.h is the public API; screens: now_playing.*, volume_screen.* (swipe right), queue_screen.* (swipe left, text rows), devices.* (list + details), library.* (one screen, content rebuilt per view, back stack); nav.h switches screens; widgets.* shared look; layout.h derives metrics from screen size
-Board:         src/board/ — board.h interface, one board_*.cpp per supported board (selected by build flag, e.g. BOARD_WAVESHARE_7B)
+Board:         src/board/ — board.h interface, one board_*.cpp per supported board (selected by build flag: BOARD_WAVESHARE_7B, BOARD_ES3C28P, BOARD_ESP32_4848S040)
 GUI:           lib/lvgl/  (LVGL v8.4, vendored) + lib/lv_conf.h
 HAL:           lib/lvgl_port/  +  lib/rgb_lcd_port/  +  lib/touch/  +  lib/io_extension/  +  lib/i2c/  +  lib/user_sd/
 Settings/web:  garnet_web (lib_deps) — captive-portal WiFi setup, settings in NVS, OTA, SD file manager, status page
