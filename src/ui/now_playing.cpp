@@ -52,6 +52,8 @@ static lv_obj_t *duration_label;  // landscape only
 static lv_obj_t *device_label;
 static lv_obj_t *notice_label;
 static lv_obj_t *progress_bar;
+static lv_obj_t *cover_placeholder;
+static lv_timer_t *pending_timer;  // fades the old artwork out when the new one is slow to arrive
 static lv_obj_t *controls;     // transport + modes (+ device name in landscape)
 static lv_obj_t *times_row;    // landscape only
 static lv_obj_t *dim_layer;    // black between background and content, see kCalmDim
@@ -293,6 +295,9 @@ static lv_obj_t *make_img(lv_obj_t *parent) {
     lv_obj_t *img = lv_img_create(parent);
     lv_obj_clear_flag(img, LV_OBJ_FLAG_CLICKABLE);
     lv_img_set_size_mode(img, LV_IMG_SIZE_MODE_REAL);
+    // Zoomed with bilinear sampling the edge pixels blend with transparent, which shows as a dark
+    // 1-2 px fringe on the left and top of the cover
+    lv_img_set_antialias(img, false);
     lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_img_opa(img, LV_OPA_TRANSP, 0);
     return img;
@@ -395,7 +400,7 @@ void build(const Layout &l) {
     lv_obj_add_event_cb(cover_box, on_cover, LV_EVENT_CLICKED, nullptr);
     // Square on purpose: clip_corner renders the cover through a masked layer in PSRAM, and on
     // the 7" RGB panel that extra traffic brought the glitches back
-    lv_obj_t *placeholder = widgets::box(cover_box);
+    lv_obj_t *placeholder = cover_placeholder = widgets::box(cover_box);
     lv_obj_set_size(placeholder, lv_pct(100), lv_pct(100));
     lv_obj_set_style_bg_color(placeholder, lv_color_hex(0x1A1A1A), 0);
     lv_obj_set_style_bg_opa(placeholder, LV_OPA_COVER, 0);
@@ -592,9 +597,37 @@ void set_notice(const char *text) {
 
 void set_cover(const lv_img_dsc_t *image) { crossfade_to(cover, image, kCoverFadeMs); }
 
+// A new track's artwork is on its way. Cached art shows within ~100 ms, so only when it is slower
+// than that the old cover and background fade out to the placeholder, tinted with the new
+// track's colour (which arrives with the metadata), instead of lingering.
+static const uint32_t kPendingDelayMs = 250;
+
+static void on_pending(lv_timer_t *t) {
+    lv_timer_del(t);
+    pending_timer = nullptr;
+    crossfade_to(cover, nullptr, kCoverFadeMs);
+    crossfade_to(background, nullptr, kBackgroundFadeMs);
+}
+
+void artwork_pending(lv_color_t accent) {
+    set_accent(accent);
+    if (pending_timer) return;
+    pending_timer = lv_timer_create(on_pending, kPendingDelayMs, nullptr);
+}
+
+void artwork_arrived() {
+    if (!pending_timer) return;
+    lv_timer_del(pending_timer);
+    pending_timer = nullptr;
+}
+
 void set_background(const lv_img_dsc_t *image) { crossfade_to(background, image, kBackgroundFadeMs); }
 
-void set_accent(lv_color_t c) { lv_obj_set_style_bg_color(progress_bar, c, LV_PART_INDICATOR); }
+void set_accent(lv_color_t c) {
+    lv_obj_set_style_bg_color(progress_bar, c, LV_PART_INDICATOR);
+    // The placeholder takes a dark shade of it
+    if (cover_placeholder) lv_obj_set_style_bg_color(cover_placeholder, lv_color_mix(c, lv_color_black(), 90), 0);
+}
 
 void release_image(const lv_img_dsc_t *image) {
     for (Crossfade *cf : {&cover, &background}) {

@@ -7,6 +7,7 @@
 #include <garnet_web.h>
 
 #include "api.h"
+#include "artwork/artwork.h"
 #include "app_config.h"
 #include "board/board.h"
 #include "model.h"
@@ -107,6 +108,20 @@ static void load_queue(int device_id) {
         strlcpy(it.thumb, q["artwork"]["proxy_120"] | "", sizeof(it.thumb));
     }
     ui::queue_set_items(device_id, items, n);
+}
+
+// The server's background file sits next to the cover: .../{hash}/320.jpg -> .../{hash}/bg_{w}x{h}.jpg
+static void prefetch_next(int device_id) {
+    JsonDocument res(api::psram());
+    if (!api::ok(ctl().queue(device_id, 1, res))) return;
+    JsonObjectConst art = res["up_next"][0]["artwork"];
+    String cover        = art["proxy_320"] | "";
+    if (cover.isEmpty()) return;
+    String background;
+    if (cover.endsWith("/320.jpg")) {
+        background = cover.substring(0, cover.length() - 7) + "bg_" + board::info().width + "x" + board::info().height + ".jpg";
+    }
+    artwork::prefetch(cover.c_str(), background.c_str());
 }
 
 // ---- Details screen data ---------------------------------------------------------
@@ -344,6 +359,18 @@ static void load_artist(int artist_id) {
     ui::library_set_artist(artist_id, res["name"] | "", res["favorite"] | false, items, n);
 }
 
+// "Spotify, DLNA" from the server's `sources` keys
+static void source_label(JsonVariantConst sources, char *out, size_t size) {
+    out[0] = '\0';
+    for (JsonVariantConst s : sources.as<JsonArrayConst>()) {
+        const char *key = s | "";
+        const char *label = !strcmp(key, "dlna") ? "DLNA" : !strcmp(key, "spotify") ? "Spotify" : !strcmp(key, "radio") ? "Radio" : nullptr;
+        if (!label) continue;
+        if (out[0]) strlcat(out, ", ", size);
+        strlcat(out, label, size);
+    }
+}
+
 static void load_album(int album_id) {
     if (!ensure_buffers()) return;
     JsonDocument res(api::psram());
@@ -359,6 +386,7 @@ static void load_album(int album_id) {
     strlcpy(album.artist, res["artist"]["name"] | "", sizeof(album.artist));
     album.year = res["year"] | 0;
     strlcpy(album.cover, res["artwork"]["proxy_320"] | "", sizeof(album.cover));
+    source_label(res["sources"], album.source, sizeof(album.source));
     album.favorite = res["favorite"] | false;
     album.playable = res["playable"] | false;
 
@@ -387,6 +415,7 @@ static void load_playlist(int playlist_id) {
     strlcpy(list.name, res["name"] | "", sizeof(list.name));
     strlcpy(list.artist, res["owner"] | "", sizeof(list.artist));
     strlcpy(list.cover, res["artwork"]["proxy_320"] | "", sizeof(list.cover));
+    source_label(res["sources"], list.source, sizeof(list.source));
     list.playable = res["playable"] | false;
 
     int n = 0;
@@ -483,6 +512,7 @@ static void run(const Command &c) {
         case Type::LoadDetails: load_details(c.device_id); break;
         case Type::LoadSource:  load_source(c.device_id); break;
         case Type::LoadQueue:   load_queue(c.device_id); break;
+        case Type::PrefetchNext: prefetch_next(c.device_id); break;
         case Type::ActivateSource: {
             if (report(ctl().activateSource(c.device_id, c.text), c.device_id)) load_details(c.device_id);
             break;

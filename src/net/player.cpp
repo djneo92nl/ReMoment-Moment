@@ -7,6 +7,7 @@
 #include "app_settings.h"
 #include "artwork/artwork.h"
 #include "board/board.h"
+#include "commands.h"
 #include "model.h"
 #include "ui/ui.h"
 
@@ -105,8 +106,11 @@ class Bridge : public remoment::Listener {
         uint8_t what = ui_flags(changes);
 
         // A cover change on the current device; a state change only clears the text, the cover stays
-        if (current && (changes & remoment::kChangeTrack) && !(changes & remoment::kChangeState))
+        if (current && (changes & remoment::kChangeTrack) && !(changes & remoment::kChangeState)) {
             artwork::request(artwork_request(d));
+            // The next track's art can be downloaded while this one plays
+            if (d.has(kCapQueue)) commands::post(commands::Type::PrefetchNext, d.id);
+        }
 
         if (changes & (remoment::kChangeTrack | remoment::kChangeState)) {
             if (current) {

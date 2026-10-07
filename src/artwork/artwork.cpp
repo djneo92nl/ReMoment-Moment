@@ -10,6 +10,7 @@
 #include "model.h"
 #include "net/api.h"
 #include "net/player.h"
+#include "ui/layout.h"
 #include "ui/ui.h"
 
 namespace artwork {
@@ -32,6 +33,7 @@ struct Kind {
 static Kind covers, backgrounds;
 static QueueHandle_t queue;        // Request, length 1 (latest wins)
 static QueueHandle_t thumb_queue;  // ThumbRequest
+static QueueHandle_t prefetch_queue;  // PrefetchRequest, length 1 (latest wins)
 static TaskHandle_t  task_handle;
 static JPEGDEC *jpeg;
 
@@ -97,6 +99,43 @@ static bool decode(const String &path, Slot &slot, bool half = false) {
     return ok;
 }
 
+// Box-filter a decoded square cover down to the size it is shown at, so LVGL never has to zoom
+// it (its transform draws the cover offset, with the edge pixels smeared over the gap).
+static void shrink(Slot &slot, int target) {
+    int w = slot.dsc.header.w, h = slot.dsc.header.h;
+    if (target <= 0 || target >= w || w != h) return;
+    size_t needed = (size_t)target * target * 2;
+    uint16_t *out = (uint16_t *)ps_malloc(needed);
+    if (!out) return;
+    const uint16_t *in = (const uint16_t *)slot.pixels;
+    for (int y = 0; y < target; y++) {
+        int y0 = y * h / target, y1 = LV_MAX((y + 1) * h / target, y0 + 1);
+        for (int x = 0; x < target; x++) {
+            int x0 = x * w / target, x1 = LV_MAX((x + 1) * w / target, x0 + 1);
+            uint32_t r = 0, g = 0, b = 0, n = 0;
+            for (int sy = y0; sy < y1; sy++) {
+                for (int sx = x0; sx < x1; sx++) {
+                    lv_color_t c;
+                    c.full = in[sy * w + sx];
+                    uint32_t c32 = lv_color_to32(c);
+                    r += (c32 >> 16) & 0xFF;
+                    g += (c32 >> 8) & 0xFF;
+                    b += c32 & 0xFF;
+                    n++;
+                }
+            }
+            lv_color_t c = lv_color_make(r / n, g / n, b / n);
+            out[y * target + x] = c.full;
+        }
+    }
+    free(slot.pixels);
+    slot.pixels = (uint8_t *)out;
+    slot.capacity = needed;
+    slot.dsc.header.w = slot.dsc.header.h = target;
+    slot.dsc.data_size = needed;
+    slot.dsc.data = slot.pixels;
+}
+
 // Loads `url` into the free slot of `kind`. Returns the image to show (nullptr = placeholder)
 // and sets `changed` when the screen needs updating.
 static const lv_img_dsc_t *load(Kind &kind, cache::Kind cache_kind, const char *url, bool &changed) {
@@ -120,6 +159,7 @@ static const lv_img_dsc_t *load(Kind &kind, cache::Kind cache_kind, const char *
     String path = cache::fetch(cache_kind, url);
     unsigned long fetched = millis();
     bool ok = !path.isEmpty() && decode(path, slot);
+    if (ok && cache_kind == cache::Kind::Cover) shrink(slot, ui::make_layout().cover);
 
     // Backgrounds are cached as {hash}.jpg whatever their size: a file cached before the
     // server rendered this screen's size is the 1024x600 one. Replace it once.
@@ -159,6 +199,11 @@ const char *background_url(JsonObjectConst art) {
 
 static const int kMaxThumbs     = 96;
 static const int kThumbQueueLen = 48;
+
+struct PrefetchRequest {
+    char cover_url[192];
+    char background_url[192];
+};
 
 struct ThumbRequest {
     uint32_t token;
@@ -222,6 +267,21 @@ static bool process_thumb() {
     return true;
 }
 
+// Next track's files: only the downloads, they are decoded when the track starts
+static bool busy();
+static bool busy_now() { return busy(); }
+
+static bool process_prefetch() {
+    PrefetchRequest r;
+    if (!prefetch_queue || xQueueReceive(prefetch_queue, &r, 0) != pdTRUE) return false;
+    unsigned long start = millis();
+    bool cover = r.cover_url[0] && !cache::fetch(cache::Kind::Cover, r.cover_url, false).isEmpty();
+    bool background = r.background_url[0] && !busy_now() && !cache::fetch(cache::Kind::Background, r.background_url, false).isEmpty();
+    Serial.printf("[artwork] prefetch next: cover %s, background %s (%lu ms)\n", cover ? "ok" : "no", background ? "ok" : "no",
+                  millis() - start);
+    return true;
+}
+
 // ---- Pre-caching: while idle, fill the SD card from the server's artwork list ----
 // (GET /api/clients/{token}/artwork: source logos, then albums most recently played first)
 
@@ -280,6 +340,8 @@ static void show(Request &req, bool cache_ok) {
     // No cover (or still being processed on the server): show the server's placeholder logo
     if (cache_ok && !req.cover_url[0]) strlcpy(req.cover_url, model.placeholder_url, sizeof(req.cover_url));
 
+    if (strcmp(req.cover_url, covers.url) != 0) ui::artwork_pending(req.has_accent, req.accent);
+
     bool cover_changed, background_changed;
     const lv_img_dsc_t *cover      = load(covers, cache::Kind::Cover, req.cover_url, cover_changed);
     const lv_img_dsc_t *background = load(backgrounds, cache::Kind::Background, req.background_url, background_changed);
@@ -301,6 +363,7 @@ static void task(void *) {
             continue;
         }
         if (cache_ok && process_thumb()) continue;
+        if (cache_ok && process_prefetch()) continue;
         if (cache_ok && precache_page()) continue;
         if (cache_ok) cache::save_if_idle();
         // Sleep until request()/thumb_request() wakes us, or check the idle timer again
@@ -315,6 +378,7 @@ void begin(bool sd_available) {
     }
     queue       = xQueueCreate(1, sizeof(Request));
     thumb_queue = xQueueCreate(kThumbQueueLen, sizeof(ThumbRequest));
+    prefetch_queue = xQueueCreate(1, sizeof(PrefetchRequest));
     // Core 0 next to WiFi; LVGL renders on core 1
     xTaskCreatePinnedToCore(task, "artwork", 8192, nullptr, 1, &task_handle, 0);
 }
@@ -322,6 +386,15 @@ void begin(bool sd_available) {
 void request(const Request &req) {
     if (!queue) return;
     xQueueOverwrite(queue, &req);
+    xTaskNotifyGive(task_handle);
+}
+
+void prefetch(const char *cover_url, const char *background_url) {
+    if (!prefetch_queue || !cover_url || !*cover_url) return;
+    PrefetchRequest r = {};
+    strlcpy(r.cover_url, cover_url, sizeof(r.cover_url));
+    if (background_url) strlcpy(r.background_url, background_url, sizeof(r.background_url));
+    xQueueOverwrite(prefetch_queue, &r);
     xTaskNotifyGive(task_handle);
 }
 

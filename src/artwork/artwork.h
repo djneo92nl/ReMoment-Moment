@@ -25,6 +25,10 @@ void begin(bool sd_available);
 // Show this artwork; a newer request replaces one that hasn't started yet.
 void request(const Request &req);
 
+// Download the next track's cover and background into the SD cache so it shows at once when it
+// starts (nothing is decoded). The latest call wins; handled when nothing more urgent is waiting.
+void prefetch(const char *cover_url, const char *background_url);
+
 // Back to the placeholder (device changed, track without artwork).
 void clear();
 

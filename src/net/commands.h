@@ -38,6 +38,7 @@ enum class Type : uint8_t {
     LoadSearch,      // text = query (at least 2 characters)
     Seek,            // value = position in seconds
     QueueJump,       // value = places ahead in the queue (1 = next track)
+    PrefetchNext,    // download the artwork of the next queued track into the SD cache
 };
 
 struct Command {

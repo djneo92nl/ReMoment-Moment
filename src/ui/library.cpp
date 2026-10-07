@@ -590,6 +590,11 @@ void set_album(const LibAlbum &album, const LibTrack *tracks, int count) {
     lv_obj_t *artist = widgets::label(side, sub, layout.font_body, color::muted());
     lv_obj_set_width(artist, layout.cover);
     lv_label_set_long_mode(artist, LV_LABEL_LONG_DOT);
+    if (album.source[0]) {
+        lv_obj_t *source = widgets::label(side, album.source, layout.font_small, color::muted());
+        lv_obj_set_width(source, layout.cover);
+        lv_label_set_long_mode(source, LV_LABEL_LONG_DOT);
+    }
     if (album.playable) {
         widgets::round_button(side, LV_SYMBOL_PLAY, layout.btn, layout.font_body, on_play_album);
     } else {
@@ -636,6 +641,7 @@ void set_album(const LibAlbum &album, const LibTrack *tracks, int count) {
         lv_obj_t *d = widgets::label(r, dur, layout.font_small, color::muted());
         lv_obj_align(d, LV_ALIGN_RIGHT_MID, 0, 0);
     }
+    update_thumbs();
 }
 
 void load_failed() {

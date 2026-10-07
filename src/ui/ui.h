@@ -91,6 +91,7 @@ struct LibAlbum {
     char artist[64];
     int  year;        // 0 = unknown
     char cover[192];  // proxy_320 URL
+    char source[24];  // where the tracks come from, e.g. "Spotify, DLNA" (empty = unknown)
     bool favorite;
     bool playable;
     bool is_playlist;  // artist = owner, tracks carry their own artist, no favorites
@@ -136,6 +137,9 @@ void toast(const char *text);
 void artwork_show(const lv_img_dsc_t *cover, bool cover_changed, const lv_img_dsc_t *background,
                   bool background_changed, bool has_accent, uint32_t accent);
 void artwork_release(const lv_img_dsc_t *image);
+// New artwork was requested but is not decoded yet: the colour shows at once, and when it takes
+// longer than a moment the old cover and background fade out to a tinted placeholder.
+void artwork_pending(bool has_accent, uint32_t accent);
 
 // Small icon in the top-left corner while something is down; hidden when all is well.
 void set_connection(bool wifi, bool server, bool mqtt);

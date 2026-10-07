@@ -280,10 +280,16 @@ void idle_check(const Device *device) {
     }
 }
 
+void artwork_pending(bool has_accent, uint32_t accent) {
+    LvglLock lock;
+    if (lock) now_playing::artwork_pending(has_accent ? lv_color_hex(accent) : color::accent());
+}
+
 void artwork_show(const lv_img_dsc_t *cover, bool cover_changed, const lv_img_dsc_t *background,
                   bool background_changed, bool has_accent, uint32_t accent) {
     LvglLock lock;
     if (!lock) return;
+    now_playing::artwork_arrived();
     if (cover_changed) now_playing::set_cover(cover);
     if (background_changed) now_playing::set_background(background);
     now_playing::set_accent(has_accent ? lv_color_hex(accent) : color::accent());
