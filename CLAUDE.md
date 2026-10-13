@@ -20,6 +20,7 @@ The plan and its order live in `ROADMAP.md`. Currently implemented: WiFi setup a
 - **MQTT (push, server → client)**: `remoment/player/{deviceId}/{data|progress|state|volume}` — published by listeners in `app/Listeners/Device/` on the server
 - **REST API (pull + commands, client → server)**: defined in `routes/api.php` on the server, docs in `docs/api/`. Key endpoints: `GET /devices`, `POST /devices/{id}/{action}` (transport), `PUT /devices/{id}/volume|mute|seek`, `GET /devices/{id}/queue|sources`, `POST /devices/{id}/library/play|play-playlist`, `POST /devices/{id}/radio/{station}`, multiroom endpoints
 - **Client registration**: `POST /clients/register` → poll `GET /clients/status/{registrationToken}` → use `apiToken` for `GET /clients/{apiToken}/devices` and `PUT /clients/{apiToken}/heartbeat`
+- Sources: the picker lives on the volume screen (swipe right from Now Playing), fed by `GET /sources?visible=1`; the details screen lists the same rows. Selected = the server's `active` (outlined row), never `in_use`; badges for `input` and Borrowed; no check marks. Show/hide is not here yet (needs an admin token). Rules: server `docs/ux/sources.md`.
 - Always check the server repo (`/Users/remko/Code/ReMomentServer`) for current topic names, payload formats, and endpoint contracts rather than guessing
 - **UI design**: the UI is written by hand in C++ (`src/ui/`); SquareLine Studio is no longer used. Look: black background, simple shapes, in the spirit of the Bang & Olufsen BeoSound Moment — ask for the user's reference images before redesigning a screen
 

@@ -182,12 +182,17 @@ static void on_power(lv_event_t *) {
     commands::post(commands::Type::Power, details_id, details_on);
 }
 
+static void redraw_sources();
+
 static void on_option(lv_event_t *e) {
     intptr_t packed = (intptr_t)lv_event_get_user_data(e);
     int s = packed >> 8, i = packed & 0xFF;
     SectionUi &sec = sections[s];
     switch ((Section)s) {
         case Section::Sources:
+            // The outline follows the tap now; the volume screen's picker is the main place to switch
+            for (int k = 0; k < sec.count; k++) sec.options[k].active = k == i;
+            redraw_sources();
             commands::post(commands::Type::ActivateSource, details_id, 0, sec.options[i].id);
             break;
         case Section::Radio:
@@ -211,6 +216,22 @@ static void add_option_row(int s, int i, const char *title, const char *detail, 
     }
 }
 
+static void draw_source_rows(SectionUi &sec) {
+    lv_obj_set_style_pad_row(sec.box, layout.gap, 0);
+    for (int i = 0; i < sec.count; i++) {
+        const Option &o = sec.options[i];
+        widgets::source_row(sec.box, layout, o.label, o.detail, o.input, o.borrowed, o.active, on_option,
+                            (void *)(intptr_t)((int)Section::Sources << 8 | i));
+    }
+}
+
+static void redraw_sources() {
+    SectionUi &sec = sections[(int)Section::Sources];
+    if (!sec.box) return;
+    lv_obj_clean(sec.box);
+    draw_source_rows(sec);
+}
+
 void set_options(int device_id, Section section, const Option *options, int count) {
     if (device_id != details_id) return;
     int s = (int)section;
@@ -220,6 +241,11 @@ void set_options(int device_id, Section section, const Option *options, int coun
 
     sec.count = LV_MIN(count, kMaxOptions);
     memcpy(sec.options, options, sizeof(Option) * sec.count);
+    if (section == Section::Sources) {
+        draw_source_rows(sec);
+        if (sec.count == 0) widgets::label(sec.box, "No sources shown", layout.font_small, color::muted());
+        return;
+    }
     for (int i = 0; i < sec.count; i++) {
         char title[64];
         if (section == Section::Group) snprintf(title, sizeof(title), "Join %s", sec.options[i].label);

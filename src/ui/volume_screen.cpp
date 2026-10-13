@@ -27,8 +27,11 @@ static lv_obj_t *power_btn;
 static lv_obj_t *mute_btn;
 static lv_obj_t *slider;
 static lv_obj_t *value_label;
-static lv_obj_t *source_box;  // header + label, hidden without a known source
-static lv_obj_t *source_label;
+static lv_obj_t *source_box;  // header + picker, hidden without sources
+static lv_obj_t *source_list;
+static const int kMaxSources = 32;
+static ui::Option sources[kMaxSources];
+static int        source_count = 0;
 static uint32_t  last_local_ms = 0;
 
 static void set_visible(lv_obj_t *obj, bool visible) {
@@ -73,6 +76,16 @@ static void on_power(lv_event_t *) {
     shown.on = !shown.on;
     widgets::set_active(power_btn, shown.on);
     commands::post(commands::Type::Power, shown.id, shown.on);
+}
+
+static void build_sources();
+
+static void on_source(lv_event_t *e) {
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    if (i < 0 || i >= source_count) return;
+    for (int k = 0; k < source_count; k++) sources[k].active = k == i;
+    build_sources();  // optimistic: the outline moves now, the device confirms later
+    commands::post(commands::Type::ActivateSource, shown.id, 0, sources[i].id);
 }
 
 // ---- Build ----------------------------------------------------------------------------
@@ -144,9 +157,10 @@ void build(const Layout &l) {
     lv_obj_set_size(source_box, lv_pct(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(source_box, LV_FLEX_FLOW_COLUMN);
     section(source_box, "SOURCE");
-    source_label = widgets::label(source_box, "", l.font_body, color::text());
-    lv_obj_set_width(source_label, lv_pct(100));
-    lv_label_set_long_mode(source_label, LV_LABEL_LONG_DOT);
+    source_list = widgets::box(source_box);
+    lv_obj_set_size(source_list, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(source_list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(source_list, layout.gap, 0);
     set_visible(source_box, false);
 
     show_volume();
@@ -170,7 +184,8 @@ void update(const Device &d, uint8_t what) {
     if (d.id != shown.id) {
         shown.id = d.id;
         what     = kUpdateAll;
-        set_visible(source_box, false);  // the previous device's source
+        source_count = 0;
+        set_visible(source_box, false);  // the previous device's sources
     }
 
     if (what & kUpdateDevice) {
@@ -193,11 +208,21 @@ void update(const Device &d, uint8_t what) {
     }
 }
 
-void set_source(int device_id, const char *label) {
+static void build_sources() {
+    lv_obj_clean(source_list);
+    for (int i = 0; i < source_count; i++) {
+        const Option &o = sources[i];
+        widgets::source_row(source_list, layout, o.label, o.detail, o.input, o.borrowed, o.active, on_source,
+                            (void *)(intptr_t)i);
+    }
+    set_visible(source_box, source_count > 0);
+}
+
+void set_sources(int device_id, const Option *list, int count) {
     if (device_id != shown.id) return;
-    bool any = label && *label;
-    if (any) lv_label_set_text(source_label, label);
-    set_visible(source_box, any);
+    source_count = LV_MIN(count, kMaxSources);
+    memcpy(sources, list, sizeof(Option) * source_count);
+    build_sources();
 }
 
 }  // namespace ui::volume_screen

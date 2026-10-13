@@ -70,20 +70,32 @@ static bool report(int status, int device_id) {
 
 // ---- Volume and queue screens -------------------------------------------------------
 
-// Quiet on failure: the source line just stays hidden
-static void load_source(int device_id) {
+// Reads the server's visible sources. The selected one is `active`, never `in_use` (B&O reports that for nearly
+// every source); a server that cannot tell leaves `active` out and nothing is outlined.
+static int read_sources(int device_id, ui::Option *options, int max) {
     JsonDocument res;
-    const char *label = "";
-    if (api::ok(ctl().sources(device_id, res))) {
-        for (JsonObjectConst s : res["sources"].as<JsonArrayConst>()) {
-            if (s["in_use"] | false) {
-                const char *name = s["friendly_name"] | "";
-                label            = *name ? name : (s["source_id"] | "");
-                break;
-            }
-        }
+    int n = 0;
+    if (!api::ok(ctl().sources(device_id, res))) return 0;
+    for (JsonObjectConst s : res["sources"].as<JsonArrayConst>()) {
+        if (n >= max) break;
+        ui::Option &o = options[n++];
+        strlcpy(o.id, s["source_id"] | "", sizeof(o.id));
+        strlcpy(o.label, s["friendly_name"] | o.id, sizeof(o.label));
+        o.borrowed = s["borrowed"] | false;
+        strlcpy(o.detail, o.borrowed ? (s["provider_name"] | "") : "", sizeof(o.detail));
+        strlcpy(o.input, s["input"] | "", sizeof(o.input));
+        o.active = s["active"] | false;
     }
-    ui::volume_set_source(device_id, label);
+    return n;
+}
+
+static const int kMaxOptions = 32;
+
+// Quiet on failure: the picker just stays hidden
+static void load_source(int device_id) {
+    static ui::Option options[kMaxOptions];
+    int n = read_sources(device_id, options, kMaxOptions);
+    ui::volume_set_sources(device_id, options, n);
 }
 
 static const int kMaxQueue = 20;
@@ -126,8 +138,6 @@ static void prefetch_next(int device_id) {
 
 // ---- Details screen data ---------------------------------------------------------
 
-static const int kMaxOptions = 32;
-
 static void load_details(int device_id) {
     int i = model.index_of(device_id);
     if (i < 0) return;
@@ -135,18 +145,7 @@ static void load_details(int device_id) {
     static ui::Option options[kMaxOptions];
 
     if (d.has(kCapSourceActivation)) {
-        JsonDocument res;
-        int n = 0;
-        if (api::ok(ctl().sources(device_id, res))) {
-            for (JsonObjectConst s : res["sources"].as<JsonArrayConst>()) {
-                if (n >= kMaxOptions) break;
-                ui::Option &o = options[n++];
-                strlcpy(o.id, s["source_id"] | "", sizeof(o.id));
-                strlcpy(o.label, s["friendly_name"] | o.id, sizeof(o.label));
-                strlcpy(o.detail, s["provider_name"] | "", sizeof(o.detail));
-                o.active = s["in_use"] | false;
-            }
-        }
+        int n = read_sources(device_id, options, kMaxOptions);
         ui::details_set_options(device_id, ui::Section::Sources, options, n);
     }
 

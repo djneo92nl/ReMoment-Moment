@@ -43,13 +43,16 @@ enum class Section : uint8_t { Sources, Radio, Group };
 struct Option {
     char id[48];
     char label[48];
-    char detail[48];
-    bool active;
+    char detail[48];  // sources: the provider of a borrowed source
+    char input[24];   // sources: physical connection ("HDMI 5"), "" for digital sources
+    bool active;      // sources: the selected one (never the server's in_use)
+    bool borrowed;    // sources
 };
 void details_set_options(int device_id, Section section, const Option *options, int count);
 
-// Volume screen (swipe right from Now Playing): the active source of a device, "" = unknown.
-void volume_set_source(int device_id, const char *label);
+// Volume screen (swipe right from Now Playing): the source picker of a device (visible sources, in the
+// server's order; none = the section stays hidden).
+void volume_set_sources(int device_id, const Option *sources, int count);
 
 // Queue screen (swipe left from Now Playing): upcoming tracks of a device, loaded by
 // commands::Type::LoadQueue.

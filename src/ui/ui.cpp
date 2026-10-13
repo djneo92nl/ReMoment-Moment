@@ -189,9 +189,9 @@ void now_playing_update(const Device &device, uint8_t what) {
     queue_screen::update(device, what);
 }
 
-void volume_set_source(int device_id, const char *label) {
+void volume_set_sources(int device_id, const Option *sources, int count) {
     LvglLock lock;
-    if (lock) volume_screen::set_source(device_id, label);
+    if (lock) volume_screen::set_sources(device_id, sources, count);
 }
 
 void queue_set_items(int device_id, const QueueItem *items, int count) {

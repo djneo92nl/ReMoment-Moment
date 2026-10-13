@@ -7,6 +7,7 @@
 
 #include "layout.h"
 #include "model.h"
+#include "ui.h"
 
 namespace ui::volume_screen {
 
@@ -20,7 +21,7 @@ void open();
 
 // Same arguments as now_playing::update(): mirrors the current device
 void update(const Device &device, uint8_t what);
-// Active source of `device_id`, "" = none/unknown
-void set_source(int device_id, const char *label);
+// Source picker of `device_id`; count 0 hides the section
+void set_sources(int device_id, const Option *sources, int count);
 
 }  // namespace ui::volume_screen
