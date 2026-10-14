@@ -36,7 +36,7 @@ def grab(s, out):
     _, w, h, swap, baud = line.split()
     w, h = int(w), int(h)
     s.baudrate = int(baud)
-    s.timeout = 10
+    s.timeout = w * h * 2 * 10 / int(baud) + 5  # transfer time plus slack
     data = s.read(w * h * 2)
     s.baudrate = 115200
     s.timeout = 2
