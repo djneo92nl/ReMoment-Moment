@@ -46,6 +46,17 @@ pio run -t clean && pio run -e ESP32-S3-Touch-LCD-7B
 
 There are no automated tests — verification is done by flashing and observing serial output + display behavior.
 
+### Screenshots
+
+The firmware sends a raw RGB565 frame over serial on request. Run with PlatformIO's python (has pyserial):
+
+```bash
+~/.platformio/penv/bin/python tools/screenshot.py              # one screenshot of the current screen
+~/.platformio/penv/bin/python tools/screenshots.py shots nvqdels  # all screens: n now playing, v volume, q queue, d devices, e details, l library, s settings
+```
+
+The serial read timeout scales with the transfer time (width × height × 2 bytes at the negotiated baud rate). The device switches screens on the `0xA6` + letter command, so no touch is needed.
+
 ## Architecture
 
 ### Layered Structure
