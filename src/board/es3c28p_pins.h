@@ -5,6 +5,12 @@
 #define ES3C28P_LCD_H_RES   320
 #define ES3C28P_LCD_V_RES   480
 
+// Case mounts the panel upside down: 1 = rotate display and touch 180 degrees
+#ifndef ES3C28P_ROTATE_180
+#define ES3C28P_ROTATE_180  1
+#endif
+#define ES3C28P_MADCTL      (ES3C28P_ROTATE_180 ? 0xC0 : 0x00)  // MY | MX
+
 // ST77922 panel over QSPI
 #define ES3C28P_LCD_CS      10
 #define ES3C28P_LCD_SCK     12

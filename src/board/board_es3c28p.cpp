@@ -87,8 +87,13 @@ static void read_touch(lv_indev_drv_t *, lv_indev_data_t *data) {
         pressed = touched;
         Serial.printf("[touch] %s %d,%d\n", touched ? "press" : "release", last_x, last_y);
     }
+#if ES3C28P_ROTATE_180
+    data->point.x = ES3C28P_LCD_H_RES - 1 - last_x;
+    data->point.y = ES3C28P_LCD_V_RES - 1 - last_y;
+#else
     data->point.x = last_x;
     data->point.y = last_y;
+#endif
     data->state   = touched ? LV_INDEV_STATE_PR : LV_INDEV_STATE_REL;
 }
 

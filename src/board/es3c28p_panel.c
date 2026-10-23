@@ -77,7 +77,7 @@ static const st77922_lcd_init_cmd_t lcd_init_cmds[] = {
     {0x29, (uint8_t []){0x00}, 0, 0},
     {0x2C, (uint8_t []){0x00}, 0, 0},
     {0x3A, (uint8_t []){0x01}, 1, 0},
-    {0x36, (uint8_t []){0x00}, 1, 0},
+    {0x36, (uint8_t []){ES3C28P_MADCTL}, 1, 0},
     {0x35, (uint8_t []){0x01}, 1, 20},
 };
 
